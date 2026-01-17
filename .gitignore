@@ -127,9 +127,11 @@ backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
+.serena/
 docs/*
+!docs/openapi.yaml
+!docs/api.md
 .serena/
 .codex/
 frontend/coverage/
 aicodex
-
