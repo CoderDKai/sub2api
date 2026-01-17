@@ -769,6 +769,10 @@ components:
           type: string
           description: 账号名称
           example: "Claude Account 1"
+        notes:
+          type: string
+          description: 备注信息
+          example: "主要用于生产环境"
         platform:
           type: string
           enum: [claude, openai, gemini, antigravity]
@@ -788,11 +792,43 @@ components:
           type: integer
           description: 并发限制
           example: 5
-        group_id:
+        priority:
+          type: integer
+          description: 优先级（数值越大优先级越高）
+          example: 10
+        rate_multiplier:
+          type: number
+          format: double
+          description: 费率倍数
+          example: 1.0
+        proxy_id:
           type: integer
           format: int64
-          description: 所属分组 ID
+          description: 代理 ID
+          nullable: true
           example: 1
+        group_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: 所属分组 ID 列表
+          example: [1, 2]
+        expires_at:
+          type: integer
+          format: int64
+          description: 过期时间（Unix 时间戳）
+          nullable: true
+          example: 1735689600
+        auto_pause_on_expired:
+          type: boolean
+          description: 过期后自动暂停调度
+          default: true
+          example: true
+        schedulable:
+          type: boolean
+          description: 是否可调度
+          example: true
         created_at:
           type: string
           format: date-time
@@ -870,28 +906,7 @@ components:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                  example: "Claude Account 1"
-                platform:
-                  type: string
-                  enum: [claude, openai, gemini, antigravity]
-                  example: "claude"
-                type:
-                  type: string
-                  enum: [oauth, setup-token, apikey]
-                  example: "oauth"
-                credentials:
-                  type: object
-                  description: 账号凭证（根据类型不同而不同）
-                  additionalProperties: true
-              required:
-                - name
-                - platform
-                - type
-                - credentials
+              $ref: '#/components/schemas/CreateAccountRequest'
       responses:
         '200':
           description: 成功创建账号
@@ -933,15 +948,7 @@ components:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                status:
-                  type: string
-                  enum: [active, inactive, error]
-                concurrency:
-                  type: integer
+              $ref: '#/components/schemas/UpdateAccountRequest'
       responses:
         '200':
           description: 成功更新账号
@@ -1173,3 +1180,148 @@ components:
           description: 未授权
         '403':
           description: 权限不足
+    
+    CreateAccountRequest:
+      type: object
+      description: 创建上游账号请求
+      properties:
+        name:
+          type: string
+          description: 账号名称
+          example: "Claude Account 1"
+        notes:
+          type: string
+          description: 备注信息
+          example: "主要用于生产环境"
+        platform:
+          type: string
+          enum: [claude, openai, gemini, antigravity]
+          description: 平台类型
+          example: "claude"
+        type:
+          type: string
+          enum: [oauth, setup-token, apikey]
+          description: 账号类型
+          example: "oauth"
+        credentials:
+          type: object
+          description: 账号凭证（根据类型不同而不同）
+          additionalProperties: true
+          example:
+            access_token: "xxx"
+            refresh_token: "yyy"
+        extra:
+          type: object
+          description: 额外配置信息
+          additionalProperties: true
+        proxy_id:
+          type: integer
+          format: int64
+          description: 代理 ID
+          nullable: true
+          example: 1
+        concurrency:
+          type: integer
+          description: 并发限制
+          default: 5
+          example: 5
+        priority:
+          type: integer
+          description: 优先级（数值越大优先级越高）
+          default: 0
+          example: 10
+        rate_multiplier:
+          type: number
+          format: double
+          description: 费率倍数
+          default: 1.0
+          example: 1.0
+        group_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: 所属分组 ID 列表
+          example: [1, 2]
+        expires_at:
+          type: integer
+          format: int64
+          description: 过期时间（Unix 时间戳）
+          nullable: true
+          example: 1735689600
+        auto_pause_on_expired:
+          type: boolean
+          description: 过期后自动暂停调度
+          default: true
+          example: true
+        confirm_mixed_channel_risk:
+          type: boolean
+          description: 用户确认混合渠道风险
+          example: false
+      required:
+        - name
+        - platform
+        - type
+        - credentials
+    
+    UpdateAccountRequest:
+      type: object
+      description: 更新上游账号请求（所有字段都是可选的）
+      properties:
+        name:
+          type: string
+          description: 账号名称
+          example: "Claude Account 1"
+        notes:
+          type: string
+          description: 备注信息
+          example: "主要用于生产环境"
+        type:
+          type: string
+          enum: [oauth, setup-token, apikey]
+          description: 账号类型
+          example: "oauth"
+        credentials:
+          type: object
+          description: 账号凭证
+          additionalProperties: true
+        extra:
+          type: object
+          description: 额外配置信息
+          additionalProperties: true
+        proxy_id:
+          type: integer
+          format: int64
+          description: 代理 ID
+          nullable: true
+        concurrency:
+          type: integer
+          description: 并发限制
+        priority:
+          type: integer
+          description: 优先级
+        rate_multiplier:
+          type: number
+          format: double
+          description: 费率倍数
+        status:
+          type: string
+          enum: [active, inactive]
+          description: 账号状态
+        group_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: 所属分组 ID 列表
+        expires_at:
+          type: integer
+          format: int64
+          description: 过期时间（Unix 时间戳）
+          nullable: true
+        auto_pause_on_expired:
+          type: boolean
+          description: 过期后自动暂停调度
+        confirm_mixed_channel_risk:
+          type: boolean
+          description: 用户确认混合渠道风险
