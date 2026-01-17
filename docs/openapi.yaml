@@ -1,40 +1,1175 @@
 openapi: 3.1.0
 info:
   title: Sub2API
-  version: 0.0.0
-  description: API documentation for Sub2API. This file is intentionally incomplete and is a work in progress.
+  version: 1.0.0
+  description: |
+    Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 API 配额。
+    
+    ## 认证方式
+    
+    Sub2API 支持三种认证方式：
+    
+    1. **JWT Token** - 用于 Web 管理后台的用户登录和操作
+       - Header: `Authorization: Bearer {jwt_token}`
+    
+    2. **API Key** - 用于 API 网关调用（OpenAI/Claude/Gemini 兼容接口）
+       - Header: `Authorization: Bearer {api_key}`
+       - Header: `x-api-key: {api_key}`
+       - Header: `x-goog-api-key: {api_key}` (Google SDK 兼容)
+       - Query: `key={api_key}` (仅限 /v1beta 和 /antigravity/v1beta)
+    
+    3. **Admin API Key** - 用于管理后台 API 和运维监控
+       - Header: `x-api-key: {admin_api_key}`
+       - 或使用具有 admin 角色的 JWT Token
+  contact:
+    name: Sub2API Support
+    url: https://github.com/Wei-Shaw/sub2api
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
 servers:
-  - url: /
-paths: {}
+  - url: http://localhost:8080
+    description: 本地开发服务器
+  - url: https://v2.pincc.ai
+    description: 演示服务器
+
+paths:
+  /api/v1/auth/register:
+    post:
+      summary: 用户注册
+      description: 创建新用户账号
+      tags:
+        - 认证
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/auth/login:
+    post:
+      summary: 用户登录
+      description: 使用邮箱和密码登录
+      tags:
+        - 认证
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: 认证失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Token 认证，用于 Web 管理后台
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: API Key 认证，格式为 "Bearer {api_key}"
+    
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: API Key 或 Admin API Key，直接在 header 中传递
+    
+    GoogleApiKey:
+      type: apiKey
+      in: header
+      name: x-goog-api-key
+      description: Google SDK 兼容的 API Key
+    
+    ApiKeyQuery:
+      type: apiKey
+      in: query
+      name: key
+      description: API Key 作为查询参数（仅限特定路径）
+
   schemas:
+    # 通用响应信封
     ResponseEnvelope:
       type: object
-      description: Common API envelope.
+      description: 标准 API 响应信封，所有管理 API 都使用此格式
       properties:
         code:
           type: integer
+          description: 业务状态码，0 表示成功，非 0 表示错误
+          example: 0
         message:
           type: string
+          description: 简短描述信息
+          example: "success"
         reason:
           type: string
+          description: 详细错误原因（可选）
+          example: "INVALID_CREDENTIALS"
         metadata:
           type: object
           additionalProperties:
             type: string
+          description: 附加元数据（可选）
         data:
+          description: 实际业务数据
           nullable: true
       required:
         - code
         - message
+    
+    # 分页数据包装器
+    PaginatedData:
+      type: object
+      description: 分页响应数据结构
+      properties:
+        items:
+          type: array
+          items: {}
+          description: 当前页数据列表
+        total:
+          type: integer
+          format: int64
+          description: 总记录数
+          example: 100
+        page:
+          type: integer
+          description: 当前页码（从 1 开始）
+          example: 1
+        page_size:
+          type: integer
+          description: 每页数量
+          example: 20
+        pages:
+          type: integer
+          description: 总页数
+          example: 5
+      required:
+        - items
+        - total
+        - page
+        - page_size
+        - pages
+    
+    # 错误响应
     ErrorResponse:
       type: object
-      description: Middleware error response.
+      description: 标准错误响应
       properties:
         code:
-          type: string
+          type: integer
+          description: HTTP 状态码或业务错误码
+          example: 400
         message:
           type: string
+          description: 面向用户的错误消息
+          example: "Invalid request"
+        reason:
+          type: string
+          description: 错误标识符
+          example: "INVALID_REQUEST"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: 错误上下文
       required:
         - code
         - message
+    
+    User:
+      type: object
+      description: 用户信息
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        email:
+          type: string
+          format: email
+          example: "user@example.com"
+        username:
+          type: string
+          example: "john_doe"
+        balance:
+          type: number
+          format: double
+          description: 用户余额（美元）
+          example: 10.50
+        role:
+          type: string
+          enum: [user, admin]
+          example: "user"
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+          example: "active"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - email
+        - role
+        - status
+    
+    APIKey:
+      type: object
+      description: API 密钥信息
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        key:
+          type: string
+          description: API 密钥（仅在创建时返回完整密钥）
+          example: "sk-xxxxxxxxxxxxxxxx"
+        name:
+          type: string
+          description: 密钥名称
+          example: "My API Key"
+        group_id:
+          type: integer
+          format: int64
+          description: 所属分组 ID
+          example: 1
+        status:
+          type: string
+          enum: [active, inactive]
+          example: "active"
+        ip_whitelist:
+          type: array
+          items:
+            type: string
+          description: IP 白名单
+          example: ["192.168.1.1", "10.0.0.0/24"]
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - status
+    
+    RegisterRequest:
+      type: object
+      description: 用户注册请求
+      properties:
+        email:
+          type: string
+          format: email
+          example: "user@example.com"
+        password:
+          type: string
+          format: password
+          minLength: 6
+          example: "password123"
+        promo_code:
+          type: string
+          description: 推广码（可选）
+          example: "WELCOME2024"
+      required:
+        - email
+        - password
+    
+    LoginRequest:
+      type: object
+      description: 用户登录请求
+      properties:
+        email:
+          type: string
+          format: email
+          example: "user@example.com"
+        password:
+          type: string
+          format: password
+          example: "password123"
+      required:
+        - email
+        - password
+    
+    LoginResponse:
+      type: object
+      description: 登录成功响应
+      properties:
+        token:
+          type: string
+          description: JWT Token
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        user:
+          $ref: '#/components/schemas/User'
+      required:
+        - token
+        - user
+  
+  /api/v1/auth/me:
+    get:
+      summary: 获取当前用户信息
+      description: 获取当前登录用户的详细信息
+      tags:
+        - 认证
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 成功获取用户信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/auth/oauth/linuxdo/start:
+    get:
+      summary: 启动 LinuxDO OAuth 登录
+      description: 重定向到 LinuxDO OAuth 授权页面
+      tags:
+        - 认证
+      parameters:
+        - name: redirect_uri
+          in: query
+          description: 授权成功后的回调地址
+          schema:
+            type: string
+            example: "http://localhost:8080/auth/callback"
+      responses:
+        '302':
+          description: 重定向到 LinuxDO OAuth 授权页面
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/keys:
+    get:
+      summary: 获取 API Key 列表
+      description: 获取当前用户的所有 API Key
+      tags:
+        - API Key 管理
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 成功获取 API Key 列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/APIKey'
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    
+    post:
+      summary: 创建 API Key
+      description: 为当前用户创建新的 API Key
+      tags:
+        - API Key 管理
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: API Key 名称
+                  example: "My API Key"
+                group_id:
+                  type: integer
+                  format: int64
+                  description: 分组 ID（可选）
+                  example: 1
+              required:
+                - name
+      responses:
+        '200':
+          description: 成功创建 API Key
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/APIKey'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/keys/{id}:
+    delete:
+      summary: 删除 API Key
+      description: 删除指定的 API Key
+      tags:
+        - API Key 管理
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: API Key ID
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 成功删除 API Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseEnvelope'
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: API Key 不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/usage/stats:
+    get:
+      summary: 获取使用量统计
+      description: 获取当前用户的使用量统计信息
+      tags:
+        - 使用量统计
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          description: 开始日期（YYYY-MM-DD）
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          description: 结束日期（YYYY-MM-DD）
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: 成功获取使用量统计
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          total_requests:
+                            type: integer
+                            example: 1000
+                          total_tokens:
+                            type: integer
+                            example: 50000
+                          total_cost:
+                            type: number
+                            format: double
+                            example: 5.50
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/admin/users:
+    get:
+      summary: 获取用户列表（管理员）
+      description: 获取所有用户的列表，支持分页
+      tags:
+        - 管理员 - 用户管理
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      parameters:
+        - name: page
+          in: query
+          description: 页码（从 1 开始）
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          description: 每页数量
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 成功获取用户列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaginatedData'
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 权限不足
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/admin/dashboard/stats:
+    get:
+      summary: 获取仪表板统计数据（管理员）
+      description: 获取系统整体统计信息
+      tags:
+        - 管理员 - 仪表板
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      responses:
+        '200':
+          description: 成功获取统计数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          total_users:
+                            type: integer
+                            example: 100
+                          total_requests:
+                            type: integer
+                            example: 10000
+                          total_revenue:
+                            type: number
+                            format: double
+                            example: 500.00
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+  
+  /v1/messages:
+    post:
+      summary: Claude API 兼容接口
+      description: 发送消息到 Claude 模型（兼容 Anthropic API）
+      tags:
+        - AI 网关
+      security:
+        - ApiKeyAuth: []
+        - ApiKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+                  example: "claude-3-5-sonnet-20241022"
+                messages:
+                  type: array
+                  items:
+                    type: object
+                max_tokens:
+                  type: integer
+                  example: 1024
+              required:
+                - model
+                - messages
+                - max_tokens
+      responses:
+        '200':
+          description: 成功响应
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          description: 请求参数错误
+        '401':
+          description: API Key 无效
+        '429':
+          description: 请求过于频繁
+  
+  /v1beta/models:
+    get:
+      summary: 列出 Gemini 模型
+      description: 获取可用的 Gemini 模型列表
+      tags:
+        - AI 网关 - Gemini
+      security:
+        - ApiKeyAuth: []
+        - ApiKeyHeader: []
+        - GoogleApiKey: []
+        - ApiKeyQuery: []
+      responses:
+        '200':
+          description: 成功获取模型列表
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: API Key 无效
+  
+  /api/v1/settings/public:
+    get:
+      summary: 获取公开设置
+      description: 获取系统的公开配置信息（无需认证）
+      tags:
+        - 系统设置
+      responses:
+        '200':
+          description: 成功获取公开设置
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          registration_enabled:
+                            type: boolean
+                            example: true
+                          turnstile_enabled:
+                            type: boolean
+                            example: false
+  
+  /health:
+    get:
+      summary: 健康检查
+      description: 检查服务是否正常运行
+      tags:
+        - 系统
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+    
+    Account:
+      type: object
+      description: 上游账号信息
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          description: 账号名称
+          example: "Claude Account 1"
+        platform:
+          type: string
+          enum: [claude, openai, gemini, antigravity]
+          description: 平台类型
+          example: "claude"
+        type:
+          type: string
+          enum: [oauth, setup-token, apikey]
+          description: 账号类型
+          example: "oauth"
+        status:
+          type: string
+          enum: [active, inactive, error]
+          description: 账号状态
+          example: "active"
+        concurrency:
+          type: integer
+          description: 并发限制
+          example: 5
+        group_id:
+          type: integer
+          format: int64
+          description: 所属分组 ID
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - platform
+        - type
+        - status
+  
+  /api/v1/admin/accounts:
+    get:
+      summary: 获取上游账号列表（管理员）
+      description: 获取所有上游账号的列表，支持分页和筛选
+      tags:
+        - 管理员 - 账号管理
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      parameters:
+        - name: page
+          in: query
+          description: 页码（从 1 开始）
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          description: 每页数量
+          schema:
+            type: integer
+            default: 20
+        - name: platform
+          in: query
+          description: 筛选平台类型
+          schema:
+            type: string
+            enum: [claude, openai, gemini, antigravity]
+        - name: status
+          in: query
+          description: 筛选账号状态
+          schema:
+            type: string
+            enum: [active, inactive, error]
+      responses:
+        '200':
+          description: 成功获取账号列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaginatedData'
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+    
+    post:
+      summary: 创建上游账号（管理员）
+      description: 创建新的上游账号
+      tags:
+        - 管理员 - 账号管理
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: "Claude Account 1"
+                platform:
+                  type: string
+                  enum: [claude, openai, gemini, antigravity]
+                  example: "claude"
+                type:
+                  type: string
+                  enum: [oauth, setup-token, apikey]
+                  example: "oauth"
+                credentials:
+                  type: object
+                  description: 账号凭证（根据类型不同而不同）
+                  additionalProperties: true
+              required:
+                - name
+                - platform
+                - type
+                - credentials
+      responses:
+        '200':
+          description: 成功创建账号
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Account'
+        '400':
+          description: 请求参数错误
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+  
+  /api/v1/admin/accounts/{id}:
+    put:
+      summary: 更新上游账号（管理员）
+      description: 更新指定的上游账号信息
+      tags:
+        - 管理员 - 账号管理
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 账号 ID
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, inactive, error]
+                concurrency:
+                  type: integer
+      responses:
+        '200':
+          description: 成功更新账号
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Account'
+        '400':
+          description: 请求参数错误
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+        '404':
+          description: 账号不存在
+    
+    delete:
+      summary: 删除上游账号（管理员）
+      description: 删除指定的上游账号
+      tags:
+        - 管理员 - 账号管理
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 账号 ID
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 成功删除账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseEnvelope'
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+        '404':
+          description: 账号不存在
+  
+  /api/v1/admin/accounts/{id}/test:
+    post:
+      summary: 测试上游账号连接（管理员）
+      description: 测试指定账号是否可以正常连接和使用
+      tags:
+        - 管理员 - 账号管理
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 账号 ID
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 测试成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          success:
+                            type: boolean
+                            example: true
+                          message:
+                            type: string
+                            example: "Connection successful"
+        '400':
+          description: 测试失败
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+        '404':
+          description: 账号不存在
+  
+  /api/v1/admin/oauth/openai/start:
+    post:
+      summary: 启动 OpenAI OAuth 授权（管理员）
+      description: 启动 OpenAI 账号的 OAuth 授权流程
+      tags:
+        - 管理员 - OAuth 集成
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 账号名称
+                  example: "OpenAI Account 1"
+                group_id:
+                  type: integer
+                  format: int64
+                  description: 分组 ID（可选）
+              required:
+                - name
+      responses:
+        '200':
+          description: 成功启动 OAuth 流程
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          auth_url:
+                            type: string
+                            description: OAuth 授权 URL
+                            example: "https://auth.openai.com/authorize?..."
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+  
+  /api/v1/admin/oauth/gemini/start:
+    post:
+      summary: 启动 Gemini OAuth 授权（管理员）
+      description: 启动 Gemini 账号的 OAuth 授权流程
+      tags:
+        - 管理员 - OAuth 集成
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: "Gemini Account 1"
+                group_id:
+                  type: integer
+                  format: int64
+              required:
+                - name
+      responses:
+        '200':
+          description: 成功启动 OAuth 流程
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          auth_url:
+                            type: string
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+  
+  /api/v1/admin/oauth/antigravity/start:
+    post:
+      summary: 启动 Antigravity OAuth 授权（管理员）
+      description: 启动 Antigravity 账号的 OAuth 授权流程
+      tags:
+        - 管理员 - OAuth 集成
+      security:
+        - BearerAuth: []
+        - ApiKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: "Antigravity Account 1"
+                group_id:
+                  type: integer
+                  format: int64
+              required:
+                - name
+      responses:
+        '200':
+          description: 成功启动 OAuth 流程
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          auth_url:
+                            type: string
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
