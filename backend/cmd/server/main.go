@@ -35,10 +35,10 @@ var embeddedVersion string
 const defaultUpdateRepo = "CoderDKai/sub2api"
 
 var (
-	Version   = ""
-	Commit    = "unknown"
-	Date      = "unknown"
-	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
+	Version    = ""
+	Commit     = "unknown"
+	Date       = "unknown"
+	BuildType  = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
 	UpdateRepo = defaultUpdateRepo
 )
 

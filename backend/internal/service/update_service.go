@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	updateCacheKey = "update_check_cache"
-	updateCacheTTL = 1200 // 20 minutes
+	updateCacheKey   = "update_check_cache"
+	updateCacheTTL   = 1200 // 20 minutes
 	defaultUpdateRepo = "CoderDKai/sub2api"
 
 	// Security: allowed download domains for updates
