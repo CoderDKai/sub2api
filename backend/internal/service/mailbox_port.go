@@ -35,12 +35,17 @@ const (
 	MailSyncJobStateFailed    = "failed"
 	MailSyncJobStateCancelled = "cancelled"
 
-	MailSyncTriggerSourceScheduled = "scheduled"
-	MailSyncTriggerSourceManual    = "manual"
-	MailSyncTriggerSourceRetry     = "retry"
+	MailSyncTriggerSourceSchedule    = "schedule"
+	MailSyncTriggerSourceManual      = "manual"
+	MailSyncTriggerSourceManualBatch = "manual_batch"
+	MailSyncTriggerSourceRetry       = "retry"
 
-	ProviderAuthKindOAuth2 = "oauth2"
-	ProviderAuthKindBasic  = "basic"
+	ProviderAuthKindImportBundle = "import_bundle"
+	ProviderAuthKindBasic        = "basic"
+	ProviderAuthKindIMAPPassword = "imap_password"
+	ProviderAuthKindSMTPPassword = "smtp_password"
+	ProviderAuthKindPOP3Password = "pop3_password"
+	ProviderAuthKindOAuth2       = "oauth2"
 )
 
 type ProviderAccount struct {
