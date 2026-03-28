@@ -18,6 +18,7 @@ const (
 	MailboxCapabilityStateSyncing = "syncing"
 
 	RecipientMatchTypeExactAddress = "exact_address"
+	RecipientMatchTypeDomainSuffix = "domain_suffix"
 
 	MailResolutionStateResolved   = "resolved"
 	MailResolutionStateUnresolved = "unresolved"
@@ -71,22 +72,28 @@ type CollectorMailbox struct {
 	DeletedAt    *time.Time `json:"deleted_at"`
 }
 
+type MailboxConnectionConfig map[string]any
+
+type MailboxCursorState map[string]any
+
+type RecipientMatchSourceMetadata map[string]any
+
 type MailboxCapability struct {
-	ID                int64      `json:"id"`
-	ProviderAccountID int64      `json:"provider_account_id"`
-	CollectorID       int64      `json:"collector_id"`
-	CapabilityKind    string     `json:"capability_kind"`
-	ConnectionConfig  map[string]any `json:"connection_config"`
-	CursorState       map[string]any `json:"cursor_state"`
-	SyncEnabled       bool       `json:"sync_enabled"`
-	SyncIntervalSeconds int      `json:"sync_interval_seconds"`
-	NextSyncAt        *time.Time `json:"next_sync_at"`
-	LastSyncAt        *time.Time `json:"last_sync_at"`
-	HealthState       string     `json:"health_state"`
-	LastError         *string    `json:"last_error"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	DeletedAt         *time.Time `json:"deleted_at"`
+	ID                  int64                   `json:"id"`
+	ProviderAccountID   int64                   `json:"provider_account_id"`
+	CollectorID         int64                   `json:"collector_id"`
+	CapabilityKind      string                  `json:"capability_kind"`
+	ConnectionConfig    MailboxConnectionConfig `json:"connection_config"`
+	CursorState         MailboxCursorState      `json:"cursor_state"`
+	SyncEnabled         bool                    `json:"sync_enabled"`
+	SyncIntervalSeconds int                     `json:"sync_interval_seconds"`
+	NextSyncAt          *time.Time              `json:"next_sync_at"`
+	LastSyncAt          *time.Time              `json:"last_sync_at"`
+	HealthState         string                  `json:"health_state"`
+	LastError           *string                 `json:"last_error"`
+	CreatedAt           time.Time               `json:"created_at"`
+	UpdatedAt           time.Time               `json:"updated_at"`
+	DeletedAt           *time.Time              `json:"deleted_at"`
 }
 
 type RecipientIdentity struct {
@@ -100,18 +107,18 @@ type RecipientIdentity struct {
 }
 
 type RecipientMatchValue struct {
-	ID                  int64      `json:"id"`
-	RecipientIdentityID int64      `json:"recipient_identity_id"`
-	MatchType           string     `json:"match_type"`
-	MatchValue          string     `json:"match_value"`
-	NormalizedValue     string     `json:"normalized_value"`
-	Active              bool       `json:"active"`
-	Priority            int        `json:"priority"`
-	SourceKind          string     `json:"source_kind"`
-	SourceMetadata      map[string]any `json:"source_metadata"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-	DisabledAt          *time.Time `json:"disabled_at"`
+	ID                  int64                        `json:"id"`
+	RecipientIdentityID int64                        `json:"recipient_identity_id"`
+	MatchType           string                       `json:"match_type"`
+	MatchValue          string                       `json:"match_value"`
+	NormalizedValue     string                       `json:"normalized_value"`
+	Active              bool                         `json:"active"`
+	Priority            int                          `json:"priority"`
+	SourceKind          string                       `json:"source_kind"`
+	SourceMetadata      RecipientMatchSourceMetadata `json:"source_metadata"`
+	CreatedAt           time.Time                    `json:"created_at"`
+	UpdatedAt           time.Time                    `json:"updated_at"`
+	DisabledAt          *time.Time                   `json:"disabled_at"`
 }
 
 type MailHeader struct {
@@ -168,7 +175,7 @@ type MailboxProvider interface {
 	ProviderKind() string
 	ValidateAccount(ctx context.Context, account *ProviderAccount) error
 	DiscoverCapabilities(ctx context.Context, account *ProviderAccount, collector *CollectorMailbox) ([]*MailboxCapability, error)
-	FetchHeaders(ctx context.Context, capability *MailboxCapability, cursor *string, limit int) ([]*MailHeader, *string, error)
+	FetchHeaders(ctx context.Context, capability *MailboxCapability, cursorState MailboxCursorState, limit int) ([]*MailHeader, MailboxCursorState, error)
 }
 
 type MailboxRepository interface {
