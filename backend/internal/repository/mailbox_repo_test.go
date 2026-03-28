@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -238,6 +239,76 @@ func TestMailboxRepository_ProviderAccountCRUDAndList(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, accounts, 2)
 	require.NotNil(t, accounts[0].DeletedAt)
+}
+
+func TestMailboxRepository_ProviderAccountNormalizesEmptyOptionalStringsToNull(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	empty := ""
+
+	account, err := repo.CreateProviderAccount(ctx, &service.ProviderAccount{
+		DisplayName:        "Nullable Provider",
+		ProviderKind:       "imap",
+		AuthKind:           service.ProviderAuthKindBasic,
+		Status:             service.ProviderAccountStatusActive,
+		EncryptedPayload:   `{"token":"nullable"}`,
+		MailboxHint:        &empty,
+		ProviderIdentifier: &empty,
+		PayloadVersion:     1,
+	})
+	require.NoError(t, err)
+	require.Nil(t, account.MailboxHint)
+	require.Nil(t, account.ProviderIdentifier)
+
+	var mailboxHint sql.NullString
+	var providerIdentifier sql.NullString
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT mailbox_hint, provider_identifier
+		FROM mailbox_provider_accounts
+		WHERE id = $1
+	`, account.ID).Scan(&mailboxHint, &providerIdentifier))
+	require.False(t, mailboxHint.Valid)
+	require.False(t, providerIdentifier.Valid)
+
+	hintValue := "value@example.com"
+	identifierValue := "provider-value"
+	updated, err := repo.UpdateProviderAccount(ctx, &service.ProviderAccount{
+		ID:                 account.ID,
+		DisplayName:        account.DisplayName,
+		ProviderKind:       account.ProviderKind,
+		AuthKind:           account.AuthKind,
+		Status:             account.Status,
+		EncryptedPayload:   account.EncryptedPayload,
+		MailboxHint:        &hintValue,
+		ProviderIdentifier: &identifierValue,
+		PayloadVersion:     account.PayloadVersion,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, updated.MailboxHint)
+	require.NotNil(t, updated.ProviderIdentifier)
+
+	updated, err = repo.UpdateProviderAccount(ctx, &service.ProviderAccount{
+		ID:                 account.ID,
+		DisplayName:        updated.DisplayName,
+		ProviderKind:       updated.ProviderKind,
+		AuthKind:           updated.AuthKind,
+		Status:             updated.Status,
+		EncryptedPayload:   updated.EncryptedPayload,
+		MailboxHint:        &empty,
+		ProviderIdentifier: &empty,
+		PayloadVersion:     updated.PayloadVersion,
+	})
+	require.NoError(t, err)
+	require.Nil(t, updated.MailboxHint)
+	require.Nil(t, updated.ProviderIdentifier)
+
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT mailbox_hint, provider_identifier
+		FROM mailbox_provider_accounts
+		WHERE id = $1
+	`, account.ID).Scan(&mailboxHint, &providerIdentifier))
+	require.False(t, mailboxHint.Valid)
+	require.False(t, providerIdentifier.Valid)
 }
 
 func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T) {

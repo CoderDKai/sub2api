@@ -42,6 +42,8 @@ func (r *mailboxRepository) CreateProviderAccount(ctx context.Context, account *
 	if status == "" {
 		status = service.ProviderAccountStatusDraft
 	}
+	mailboxHint := normalizeOptionalStringArg(account.MailboxHint)
+	providerIdentifier := normalizeOptionalStringArg(account.ProviderIdentifier)
 	payloadVersion := account.PayloadVersion
 	if payloadVersion == 0 {
 		payloadVersion = 1
@@ -77,7 +79,7 @@ func (r *mailboxRepository) CreateProviderAccount(ctx context.Context, account *
 			created_at,
 			updated_at,
 			deleted_at
-	`, account.DisplayName, account.ProviderKind, account.AuthKind, status, account.EncryptedPayload, account.MailboxHint, account.ProviderIdentifier, payloadVersion, account.LastImportedAt, account.LastValidationAt, account.LastValidationError)
+	`, account.DisplayName, account.ProviderKind, account.AuthKind, status, account.EncryptedPayload, mailboxHint, providerIdentifier, payloadVersion, account.LastImportedAt, account.LastValidationAt, account.LastValidationError)
 
 	created, err := scanProviderAccount(row)
 	if err != nil {
@@ -127,6 +129,8 @@ func (r *mailboxRepository) UpdateProviderAccount(ctx context.Context, account *
 	if status == "" {
 		status = service.ProviderAccountStatusDraft
 	}
+	mailboxHint := normalizeOptionalStringArg(account.MailboxHint)
+	providerIdentifier := normalizeOptionalStringArg(account.ProviderIdentifier)
 	payloadVersion := account.PayloadVersion
 	if payloadVersion == 0 {
 		payloadVersion = 1
@@ -164,7 +168,7 @@ func (r *mailboxRepository) UpdateProviderAccount(ctx context.Context, account *
 			created_at,
 			updated_at,
 			deleted_at
-	`, account.ID, account.DisplayName, account.ProviderKind, account.AuthKind, status, account.EncryptedPayload, account.MailboxHint, account.ProviderIdentifier, payloadVersion, account.LastImportedAt, account.LastValidationAt, account.LastValidationError)
+	`, account.ID, account.DisplayName, account.ProviderKind, account.AuthKind, status, account.EncryptedPayload, mailboxHint, providerIdentifier, payloadVersion, account.LastImportedAt, account.LastValidationAt, account.LastValidationError)
 
 	return scanProviderAccount(row)
 }
@@ -1664,6 +1668,16 @@ func decodeRecipientMatchSourceMetadata(raw []byte) (service.RecipientMatchSourc
 		return service.RecipientMatchSourceMetadata{}, nil
 	}
 	return out, nil
+}
+
+func normalizeOptionalStringArg(v *string) any {
+	if v == nil {
+		return nil
+	}
+	if *v == "" {
+		return nil
+	}
+	return *v
 }
 
 func normalizeMailboxListLimit(limit int) int {
