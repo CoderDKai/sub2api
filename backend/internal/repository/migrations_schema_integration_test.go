@@ -109,7 +109,9 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 
 	requireTableExists(t, tx, "mailbox_collectors")
 	requireColumnExists(t, tx, "mailbox_collectors", "email_address")
+	requireColumn(t, tx, "mailbox_collectors", "enabled", "boolean", 0, false)
 	requireColumnNotExists(t, tx, "mailbox_collectors", "provider_account_id")
+	requireColumnNotExists(t, tx, "mailbox_collectors", "status")
 
 	requireTableExists(t, tx, "mailbox_capabilities")
 	requireColumnExists(t, tx, "mailbox_capabilities", "provider_account_id")
@@ -118,6 +120,7 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 
 	requireTableExists(t, tx, "mailbox_recipient_identities")
 	requireColumnExists(t, tx, "mailbox_recipient_identities", "name")
+	requireColumn(t, tx, "mailbox_recipient_identities", "enabled", "boolean", 0, false)
 	requireColumnNotExists(t, tx, "mailbox_recipient_identities", "collector_id")
 
 	requireTableExists(t, tx, "mailbox_recipient_match_values")

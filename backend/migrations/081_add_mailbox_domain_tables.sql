@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS mailbox_collectors (
     id BIGSERIAL PRIMARY KEY,
     email_address VARCHAR(320) NOT NULL,
     display_name VARCHAR(255) NOT NULL DEFAULT '',
-    status VARCHAR(32) NOT NULL DEFAULT 'active',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS mailbox_recipient_identities (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     normalized_name VARCHAR(255) NOT NULL DEFAULT '',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ

@@ -11,9 +11,6 @@ const (
 	ProviderAccountStatusInvalid  = "invalid"
 	ProviderAccountStatusDisabled = "disabled"
 
-	CollectorMailboxStatusActive = "active"
-	CollectorMailboxStatusPaused = "paused"
-
 	MailboxCapabilityStateHealthy = "healthy"
 	MailboxCapabilityStateWarning = "warning"
 	MailboxCapabilityStateError   = "error"
@@ -67,7 +64,7 @@ type CollectorMailbox struct {
 	ID           int64      `json:"id"`
 	EmailAddress string     `json:"email_address"`
 	DisplayName  string     `json:"display_name"`
-	Status       string     `json:"status"`
+	Enabled      bool       `json:"enabled"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DeletedAt    *time.Time `json:"deleted_at"`
@@ -93,6 +90,7 @@ type RecipientIdentity struct {
 	ID             int64      `json:"id"`
 	Name           string     `json:"name"`
 	NormalizedName string     `json:"normalized_name"`
+	Enabled        bool       `json:"enabled"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	DeletedAt      *time.Time `json:"deleted_at"`
