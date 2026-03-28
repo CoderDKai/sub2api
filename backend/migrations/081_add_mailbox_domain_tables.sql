@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS mailbox_sync_jobs (
     capability_id BIGINT NOT NULL REFERENCES mailbox_capabilities(id) ON DELETE CASCADE,
     batch_id VARCHAR(64),
     state VARCHAR(32) NOT NULL DEFAULT 'queued',
-    trigger_source VARCHAR(32) NOT NULL DEFAULT 'scheduled',
+    trigger_source VARCHAR(32) NOT NULL DEFAULT 'schedule',
     scheduled_for TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,

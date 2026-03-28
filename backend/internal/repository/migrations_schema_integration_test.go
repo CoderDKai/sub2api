@@ -181,6 +181,7 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	requireColumnExists(t, tx, "mailbox_sync_jobs", "next_retry_at")
 	requireColumnExists(t, tx, "mailbox_sync_jobs", "error_summary")
 	requireColumnDefaultContains(t, tx, "mailbox_sync_jobs", "state", "queued")
+	requireColumnDefaultContains(t, tx, "mailbox_sync_jobs", "trigger_source", "schedule")
 }
 
 func requireTableExists(t *testing.T, tx *sql.Tx, table string) {
