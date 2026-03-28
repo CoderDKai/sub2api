@@ -179,6 +179,136 @@ func TestMailboxRepository_ListHeadersFiltersByCollectorAndFolder(t *testing.T) 
 	require.Equal(t, []string{"seen"}, headers[0].Flags)
 }
 
+func TestMailboxRepository_ProviderAccountCRUDAndList(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+
+	account := mustCreateMailboxProviderAccount(t, ctx, repo)
+
+	got, err := repo.GetProviderAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, account.ID, got.ID)
+
+	updatedName := "Updated Provider"
+	updatedStatus := service.ProviderAccountStatusInvalid
+	updatedPayload := `{"token":"updated"}`
+	updatedHint := "updated@example.com"
+	updatedIdentifier := "updated-provider"
+	updated, err := repo.UpdateProviderAccount(ctx, &service.ProviderAccount{
+		ID:                 account.ID,
+		DisplayName:        updatedName,
+		ProviderKind:       got.ProviderKind,
+		AuthKind:           got.AuthKind,
+		Status:             updatedStatus,
+		EncryptedPayload:   updatedPayload,
+		MailboxHint:        &updatedHint,
+		ProviderIdentifier: &updatedIdentifier,
+		PayloadVersion:     got.PayloadVersion + 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, updatedName, updated.DisplayName)
+	require.Equal(t, updatedStatus, updated.Status)
+
+	accounts, err := repo.ListProviderAccounts(ctx, false, 10)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Equal(t, account.ID, accounts[0].ID)
+
+	require.NoError(t, repo.DeleteProviderAccount(ctx, account.ID))
+	accounts, err = repo.ListProviderAccounts(ctx, false, 10)
+	require.NoError(t, err)
+	require.Empty(t, accounts)
+
+	accounts, err = repo.ListProviderAccounts(ctx, true, 10)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.NotNil(t, accounts[0].DeletedAt)
+}
+
+func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	account := mustCreateMailboxProviderAccount(t, ctx, repo)
+	collector := mustCreateMailboxCollector(t, ctx, repo)
+
+	collector.DisplayName = "Updated Collector"
+	collector.BusinessTags = []string{"vip"}
+	updatedCollector, err := repo.UpdateCollector(ctx, collector)
+	require.NoError(t, err)
+	require.Equal(t, "Updated Collector", updatedCollector.DisplayName)
+	gotCollector, err := repo.GetCollectorByID(ctx, collector.ID)
+	require.NoError(t, err)
+	require.Equal(t, collector.ID, gotCollector.ID)
+
+	collectors, err := repo.ListCollectors(ctx, false, 10)
+	require.NoError(t, err)
+	require.Len(t, collectors, 1)
+	require.Equal(t, collector.ID, collectors[0].ID)
+
+	nextSyncAt := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Microsecond)
+	capability, err := repo.CreateCapability(ctx, &service.MailboxCapability{
+		ProviderAccountID:   account.ID,
+		CollectorID:         collector.ID,
+		CapabilityKind:      "imap-crud",
+		ConnectionConfig:    service.MailboxConnectionConfig{"host": "imap.example.com"},
+		CursorState:         service.MailboxCursorState{"cursor": "1"},
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 180,
+		NextSyncAt:          &nextSyncAt,
+		HealthState:         service.MailboxCapabilityStateHealthy,
+	})
+	require.NoError(t, err)
+
+	gotCapability, err := repo.GetCapabilityByID(ctx, capability.ID)
+	require.NoError(t, err)
+	require.Equal(t, capability.ID, gotCapability.ID)
+
+	capability.HealthState = service.MailboxCapabilityStateWarning
+	capability.LastError = ptrString("temporary issue")
+	updatedCapability, err := repo.UpdateCapability(ctx, capability)
+	require.NoError(t, err)
+	require.Equal(t, service.MailboxCapabilityStateWarning, updatedCapability.HealthState)
+
+	capabilities, err := repo.ListCapabilities(ctx, false, 10)
+	require.NoError(t, err)
+	require.Len(t, capabilities, 1)
+
+	queuedJobs, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
+		CapabilityID:  capability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceManual,
+		ScheduledFor:  time.Now().UTC(),
+	}})
+	require.NoError(t, err)
+	require.Len(t, queuedJobs, 1)
+
+	activeJobs, err := repo.ListActiveSyncJobs(ctx, &capability.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, activeJobs, 1)
+	require.Equal(t, queuedJobs[0].ID, activeJobs[0].ID)
+
+	startedAt := time.Now().UTC().Truncate(time.Microsecond)
+	finishedAt := startedAt.Add(30 * time.Second)
+	updatedJob, err := repo.UpdateSyncJobState(ctx, queuedJobs[0].ID, service.MailSyncJobStateSucceeded, &startedAt, &finishedAt, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, service.MailSyncJobStateSucceeded, updatedJob.State)
+	require.NotNil(t, updatedJob.FinishedAt)
+
+	activeJobs, err = repo.ListActiveSyncJobs(ctx, &capability.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, activeJobs)
+
+	require.NoError(t, repo.DeleteCapability(ctx, capability.ID))
+	capabilities, err = repo.ListCapabilities(ctx, false, 10)
+	require.NoError(t, err)
+	require.Empty(t, capabilities)
+
+	require.NoError(t, repo.DeleteCollector(ctx, collector.ID))
+	collectors, err = repo.ListCollectors(ctx, false, 10)
+	require.NoError(t, err)
+	require.Empty(t, collectors)
+}
+
 type mailboxCapabilitySeed struct {
 	CapabilityKind      string
 	SyncEnabled         bool
@@ -199,10 +329,10 @@ type mailboxHeaderSeed struct {
 	Snippet         string
 }
 
-func newMailboxRepositoryForTest(t *testing.T) service.MailboxRepository {
+func newMailboxRepositoryForTest(t *testing.T) *mailboxRepository {
 	t.Helper()
 	cleanupMailboxTables(t)
-	return NewMailboxRepository(integrationDB)
+	return &mailboxRepository{db: integrationDB}
 }
 
 func cleanupMailboxTables(t *testing.T) {
@@ -334,5 +464,9 @@ func mailboxRowCount(t *testing.T, ctx context.Context, table string) int64 {
 }
 
 func ptrTime(v time.Time) *time.Time {
+	return &v
+}
+
+func ptrString(v string) *string {
 	return &v
 }

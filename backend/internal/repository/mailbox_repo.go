@@ -86,6 +86,155 @@ func (r *mailboxRepository) CreateProviderAccount(ctx context.Context, account *
 	return created, nil
 }
 
+func (r *mailboxRepository) GetProviderAccountByID(ctx context.Context, id int64) (*service.ProviderAccount, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			display_name,
+			provider_kind,
+			auth_kind,
+			status,
+			encrypted_payload,
+			mailbox_hint,
+			provider_identifier,
+			payload_version,
+			last_imported_at,
+			last_validation_at,
+			last_validation_error,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM mailbox_provider_accounts
+		WHERE id = $1
+	`, id)
+
+	return scanProviderAccount(row)
+}
+
+func (r *mailboxRepository) UpdateProviderAccount(ctx context.Context, account *service.ProviderAccount) (*service.ProviderAccount, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if account == nil {
+		return nil, errors.New("provider account is nil")
+	}
+
+	status := account.Status
+	if status == "" {
+		status = service.ProviderAccountStatusDraft
+	}
+	payloadVersion := account.PayloadVersion
+	if payloadVersion == 0 {
+		payloadVersion = 1
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		UPDATE mailbox_provider_accounts
+		SET
+			display_name = $2,
+			provider_kind = $3,
+			auth_kind = $4,
+			status = $5,
+			encrypted_payload = $6,
+			mailbox_hint = $7,
+			provider_identifier = $8,
+			payload_version = $9,
+			last_imported_at = $10,
+			last_validation_at = $11,
+			last_validation_error = $12,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING
+			id,
+			display_name,
+			provider_kind,
+			auth_kind,
+			status,
+			encrypted_payload,
+			mailbox_hint,
+			provider_identifier,
+			payload_version,
+			last_imported_at,
+			last_validation_at,
+			last_validation_error,
+			created_at,
+			updated_at,
+			deleted_at
+	`, account.ID, account.DisplayName, account.ProviderKind, account.AuthKind, status, account.EncryptedPayload, account.MailboxHint, account.ProviderIdentifier, payloadVersion, account.LastImportedAt, account.LastValidationAt, account.LastValidationError)
+
+	return scanProviderAccount(row)
+}
+
+func (r *mailboxRepository) ListProviderAccounts(ctx context.Context, includeDeleted bool, limit int) ([]*service.ProviderAccount, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	query := `
+		SELECT
+			id,
+			display_name,
+			provider_kind,
+			auth_kind,
+			status,
+			encrypted_payload,
+			mailbox_hint,
+			provider_identifier,
+			payload_version,
+			last_imported_at,
+			last_validation_at,
+			last_validation_error,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM mailbox_provider_accounts`
+	args := make([]any, 0, 1)
+	if !includeDeleted {
+		query += ` WHERE deleted_at IS NULL`
+	}
+	query += ` ORDER BY id ASC LIMIT $1`
+	args = append(args, normalizeMailboxListLimit(limit))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	accounts := make([]*service.ProviderAccount, 0)
+	for rows.Next() {
+		account, err := scanProviderAccount(rows)
+		if err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return accounts, nil
+}
+
+func (r *mailboxRepository) DeleteProviderAccount(ctx context.Context, id int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("mailbox repository db is nil")
+	}
+
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE mailbox_provider_accounts
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+	return ensureRowsAffected(res)
+}
+
 func (r *mailboxRepository) CreateCollector(ctx context.Context, collector *service.CollectorMailbox) (*service.CollectorMailbox, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
@@ -122,6 +271,121 @@ func (r *mailboxRepository) CreateCollector(ctx context.Context, collector *serv
 		return nil, err
 	}
 	return created, nil
+}
+
+func (r *mailboxRepository) GetCollectorByID(ctx context.Context, id int64) (*service.CollectorMailbox, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			email_address,
+			display_name,
+			enabled,
+			business_tags,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM mailbox_collectors
+		WHERE id = $1
+	`, id)
+
+	return scanCollector(row)
+}
+
+func (r *mailboxRepository) UpdateCollector(ctx context.Context, collector *service.CollectorMailbox) (*service.CollectorMailbox, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if collector == nil {
+		return nil, errors.New("collector is nil")
+	}
+
+	businessTags, err := marshalJSONB(collector.BusinessTags, []byte("[]"))
+	if err != nil {
+		return nil, err
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		UPDATE mailbox_collectors
+		SET
+			email_address = $2,
+			display_name = $3,
+			enabled = $4,
+			business_tags = $5::jsonb,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING
+			id,
+			email_address,
+			display_name,
+			enabled,
+			business_tags,
+			created_at,
+			updated_at,
+			deleted_at
+	`, collector.ID, collector.EmailAddress, collector.DisplayName, collector.Enabled, string(businessTags))
+
+	return scanCollector(row)
+}
+
+func (r *mailboxRepository) ListCollectors(ctx context.Context, includeDeleted bool, limit int) ([]*service.CollectorMailbox, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	query := `
+		SELECT
+			id,
+			email_address,
+			display_name,
+			enabled,
+			business_tags,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM mailbox_collectors`
+	if !includeDeleted {
+		query += ` WHERE deleted_at IS NULL`
+	}
+	query += ` ORDER BY id ASC LIMIT $1`
+
+	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	collectors := make([]*service.CollectorMailbox, 0)
+	for rows.Next() {
+		collector, err := scanCollector(rows)
+		if err != nil {
+			return nil, err
+		}
+		collectors = append(collectors, collector)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return collectors, nil
+}
+
+func (r *mailboxRepository) DeleteCollector(ctx context.Context, id int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("mailbox repository db is nil")
+	}
+
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE mailbox_collectors
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+	return ensureRowsAffected(res)
 }
 
 func (r *mailboxRepository) CreateCapability(ctx context.Context, capability *service.MailboxCapability) (*service.MailboxCapability, error) {
@@ -186,6 +450,161 @@ func (r *mailboxRepository) CreateCapability(ctx context.Context, capability *se
 		return nil, err
 	}
 	return created, nil
+}
+
+func (r *mailboxRepository) GetCapabilityByID(ctx context.Context, id int64) (*service.MailboxCapability, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			provider_account_id,
+			collector_id,
+			capability_kind,
+			connection_config,
+			cursor_state,
+			sync_enabled,
+			sync_interval_seconds,
+			next_sync_at,
+			last_sync_at,
+			health_state,
+			last_error,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM mailbox_capabilities
+		WHERE id = $1
+	`, id)
+
+	return scanMailboxCapability(row)
+}
+
+func (r *mailboxRepository) UpdateCapability(ctx context.Context, capability *service.MailboxCapability) (*service.MailboxCapability, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if capability == nil {
+		return nil, errors.New("capability is nil")
+	}
+
+	connectionConfig, err := marshalJSONB(capability.ConnectionConfig, []byte("{}"))
+	if err != nil {
+		return nil, err
+	}
+	cursorState, err := marshalJSONB(capability.CursorState, []byte("{}"))
+	if err != nil {
+		return nil, err
+	}
+	syncInterval := capability.SyncIntervalSeconds
+	if syncInterval <= 0 {
+		syncInterval = defaultMailboxCapabilitySyncInterval
+	}
+	healthState := capability.HealthState
+	if healthState == "" {
+		healthState = service.MailboxCapabilityStateHealthy
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		UPDATE mailbox_capabilities
+		SET
+			provider_account_id = $2,
+			collector_id = $3,
+			capability_kind = $4,
+			connection_config = $5::jsonb,
+			cursor_state = $6::jsonb,
+			sync_enabled = $7,
+			sync_interval_seconds = $8,
+			next_sync_at = $9,
+			last_sync_at = $10,
+			health_state = $11,
+			last_error = $12,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING
+			id,
+			provider_account_id,
+			collector_id,
+			capability_kind,
+			connection_config,
+			cursor_state,
+			sync_enabled,
+			sync_interval_seconds,
+			next_sync_at,
+			last_sync_at,
+			health_state,
+			last_error,
+			created_at,
+			updated_at,
+			deleted_at
+	`, capability.ID, capability.ProviderAccountID, capability.CollectorID, capability.CapabilityKind, string(connectionConfig), string(cursorState), capability.SyncEnabled, syncInterval, capability.NextSyncAt, capability.LastSyncAt, healthState, capability.LastError)
+
+	return scanMailboxCapability(row)
+}
+
+func (r *mailboxRepository) ListCapabilities(ctx context.Context, includeDeleted bool, limit int) ([]*service.MailboxCapability, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	query := `
+		SELECT
+			id,
+			provider_account_id,
+			collector_id,
+			capability_kind,
+			connection_config,
+			cursor_state,
+			sync_enabled,
+			sync_interval_seconds,
+			next_sync_at,
+			last_sync_at,
+			health_state,
+			last_error,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM mailbox_capabilities`
+	if !includeDeleted {
+		query += ` WHERE deleted_at IS NULL`
+	}
+	query += ` ORDER BY id ASC LIMIT $1`
+
+	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	capabilities := make([]*service.MailboxCapability, 0)
+	for rows.Next() {
+		capability, err := scanMailboxCapability(rows)
+		if err != nil {
+			return nil, err
+		}
+		capabilities = append(capabilities, capability)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return capabilities, nil
+}
+
+func (r *mailboxRepository) DeleteCapability(ctx context.Context, id int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("mailbox repository db is nil")
+	}
+
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE mailbox_capabilities
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+	return ensureRowsAffected(res)
 }
 
 func (r *mailboxRepository) CreateRecipientIdentity(ctx context.Context, in *service.RecipientIdentity, values []*service.RecipientMatchValue) (*service.RecipientIdentity, error) {
@@ -395,6 +814,95 @@ func (r *mailboxRepository) CreateSyncJobs(ctx context.Context, jobs []*service.
 		return nil, err
 	}
 	return created, nil
+}
+
+func (r *mailboxRepository) ListActiveSyncJobs(ctx context.Context, capabilityID *int64, limit int) ([]*service.MailSyncJob, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	query := `
+		SELECT
+			id,
+			capability_id,
+			batch_id,
+			state,
+			trigger_source,
+			scheduled_for,
+			started_at,
+			finished_at,
+			retryable,
+			retry_count,
+			next_retry_at,
+			error_summary,
+			created_at,
+			updated_at
+		FROM mailbox_sync_jobs
+		WHERE state IN ($1, $2)`
+	args := []any{service.MailSyncJobStateQueued, service.MailSyncJobStateRunning}
+	if capabilityID != nil {
+		args = append(args, *capabilityID)
+		query += fmt.Sprintf(" AND capability_id = $%d", len(args))
+	}
+	args = append(args, normalizeMailboxListLimit(limit))
+	query += fmt.Sprintf(" ORDER BY scheduled_for ASC, id ASC LIMIT $%d", len(args))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	jobs := make([]*service.MailSyncJob, 0)
+	for rows.Next() {
+		job, err := scanMailSyncJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func (r *mailboxRepository) UpdateSyncJobState(ctx context.Context, jobID int64, state string, startedAt, finishedAt, nextRetryAt *time.Time, errorSummary *string) (*service.MailSyncJob, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if strings.TrimSpace(state) == "" {
+		return nil, errors.New("sync job state is required")
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		UPDATE mailbox_sync_jobs
+		SET
+			state = $2,
+			started_at = COALESCE($3, started_at),
+			finished_at = $4,
+			next_retry_at = $5,
+			error_summary = $6,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING
+			id,
+			capability_id,
+			batch_id,
+			state,
+			trigger_source,
+			scheduled_for,
+			started_at,
+			finished_at,
+			retryable,
+			retry_count,
+			next_retry_at,
+			error_summary,
+			created_at,
+			updated_at
+	`, jobID, state, startedAt, finishedAt, nextRetryAt, errorSummary)
+
+	return scanMailSyncJob(row)
 }
 
 func (r *mailboxRepository) ClaimDueCapabilities(ctx context.Context, now time.Time, limit int) ([]*service.MailboxCapability, error) {
@@ -769,6 +1277,27 @@ func decodeMailboxCursorState(raw []byte) (service.MailboxCursorState, error) {
 		return service.MailboxCursorState{}, nil
 	}
 	return out, nil
+}
+
+func normalizeMailboxListLimit(limit int) int {
+	if limit <= 0 {
+		return defaultMailboxHeaderListLimit
+	}
+	return limit
+}
+
+func ensureRowsAffected(res sql.Result) error {
+	if res == nil {
+		return sql.ErrNoRows
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func nullableStringPtr(v sql.NullString) *string {
