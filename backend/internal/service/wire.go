@@ -13,8 +13,8 @@ import (
 
 // BuildInfo contains build information
 type BuildInfo struct {
-	Version   string
-	BuildType string
+	Version    string
+	BuildType  string
 	UpdateRepo string
 }
 
