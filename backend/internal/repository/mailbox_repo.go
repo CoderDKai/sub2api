@@ -874,6 +874,9 @@ func (r *mailboxRepository) ReplaceRecipientMatchValues(ctx context.Context, rec
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
 	}
+	if err := r.ensureRecipientIdentityActive(ctx, recipientIdentityID); err != nil {
+		return nil, err
+	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1758,6 +1761,28 @@ func (r *mailboxRepository) ensureCapabilityParentsActive(ctx context.Context, p
 	}
 	if !collectorActive {
 		return errors.New("collector is deleted or missing")
+	}
+	return nil
+}
+
+func (r *mailboxRepository) ensureRecipientIdentityActive(ctx context.Context, recipientIdentityID int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("mailbox repository db is nil")
+	}
+
+	var active bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM mailbox_recipient_identities
+			WHERE id = $1 AND deleted_at IS NULL
+		)
+	`, recipientIdentityID).Scan(&active)
+	if err != nil {
+		return err
+	}
+	if !active {
+		return errors.New("recipient identity is deleted or missing")
 	}
 	return nil
 }

@@ -638,6 +638,33 @@ func TestMailboxRepository_RecipientIdentityCRUDAndReplaceMatchValues(t *testing
 	require.NotNil(t, identities[0].DeletedAt)
 }
 
+func TestMailboxRepository_ReplaceRecipientMatchValuesRejectsDeletedIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+
+	identity, err := repo.CreateRecipientIdentity(ctx, &service.RecipientIdentity{
+		Name:           "Deleted Identity",
+		NormalizedName: "deleted identity",
+		Enabled:        true,
+	}, nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteRecipientIdentity(ctx, identity.ID))
+
+	_, err = repo.ReplaceRecipientMatchValues(ctx, identity.ID, []*service.RecipientMatchValue{{
+		MatchType:       service.RecipientMatchTypeExactAddress,
+		MatchValue:      "deleted@example.com",
+		NormalizedValue: "deleted@example.com",
+		Active:          true,
+		Priority:        10,
+		SourceKind:      "manual",
+	}})
+	require.Error(t, err)
+
+	matchValues, err := repo.ListRecipientMatchValues(ctx, identity.ID)
+	require.NoError(t, err)
+	require.Empty(t, matchValues)
+}
+
 func TestMailboxRepository_GetHeaderByIDReturnsHydratedDetail(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)
