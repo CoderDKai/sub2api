@@ -80,7 +80,7 @@ type MailboxCapability struct {
 	CursorState       map[string]any `json:"cursor_state"`
 	SyncEnabled       bool       `json:"sync_enabled"`
 	SyncIntervalSeconds int      `json:"sync_interval_seconds"`
-	NextSyncAt        time.Time  `json:"next_sync_at"`
+	NextSyncAt        *time.Time `json:"next_sync_at"`
 	LastSyncAt        *time.Time `json:"last_sync_at"`
 	HealthState       string     `json:"health_state"`
 	LastError         *string    `json:"last_error"`
