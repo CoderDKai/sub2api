@@ -671,6 +671,267 @@ func (r *mailboxRepository) CreateRecipientIdentity(ctx context.Context, in *ser
 	return created, nil
 }
 
+func (r *mailboxRepository) GetRecipientIdentityByID(ctx context.Context, id int64) (*service.RecipientIdentity, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		SELECT id, name, normalized_name, enabled, created_at, updated_at, deleted_at
+		FROM mailbox_recipient_identities
+		WHERE id = $1
+	`, id)
+
+	return scanRecipientIdentity(row)
+}
+
+func (r *mailboxRepository) UpdateRecipientIdentity(ctx context.Context, in *service.RecipientIdentity) (*service.RecipientIdentity, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if in == nil {
+		return nil, errors.New("recipient identity is nil")
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		UPDATE mailbox_recipient_identities
+		SET
+			name = $2,
+			normalized_name = $3,
+			enabled = $4,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING id, name, normalized_name, enabled, created_at, updated_at, deleted_at
+	`, in.ID, in.Name, in.NormalizedName, in.Enabled)
+
+	return scanRecipientIdentity(row)
+}
+
+func (r *mailboxRepository) ListRecipientIdentities(ctx context.Context, includeDeleted bool, limit int) ([]*service.RecipientIdentity, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	query := `
+		SELECT id, name, normalized_name, enabled, created_at, updated_at, deleted_at
+		FROM mailbox_recipient_identities`
+	if !includeDeleted {
+		query += ` WHERE deleted_at IS NULL`
+	}
+	query += ` ORDER BY id ASC LIMIT $1`
+
+	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	identities := make([]*service.RecipientIdentity, 0)
+	for rows.Next() {
+		identity, err := scanRecipientIdentity(rows)
+		if err != nil {
+			return nil, err
+		}
+		identities = append(identities, identity)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return identities, nil
+}
+
+func (r *mailboxRepository) DeleteRecipientIdentity(ctx context.Context, id int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("mailbox repository db is nil")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE mailbox_recipient_identities
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+	if err := ensureRowsAffected(res); err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE mailbox_recipient_match_values
+		SET
+			active = FALSE,
+			disabled_at = COALESCE(disabled_at, NOW()),
+			updated_at = NOW()
+		WHERE recipient_identity_id = $1 AND active = TRUE
+	`, id)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *mailboxRepository) ListRecipientMatchValues(ctx context.Context, recipientIdentityID int64) ([]*service.RecipientMatchValue, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			id,
+			recipient_identity_id,
+			match_type,
+			match_value,
+			normalized_value,
+			active,
+			priority,
+			source_kind,
+			source_metadata,
+			created_at,
+			updated_at,
+			disabled_at
+		FROM mailbox_recipient_match_values
+		WHERE recipient_identity_id = $1 AND active = TRUE
+		ORDER BY priority DESC, id ASC
+	`, recipientIdentityID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	values := make([]*service.RecipientMatchValue, 0)
+	for rows.Next() {
+		value, err := scanRecipientMatchValue(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func (r *mailboxRepository) ReplaceRecipientMatchValues(ctx context.Context, recipientIdentityID int64, values []*service.RecipientMatchValue) ([]*service.RecipientMatchValue, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE mailbox_recipient_match_values
+		SET
+			active = FALSE,
+			disabled_at = COALESCE(disabled_at, NOW()),
+			updated_at = NOW()
+		WHERE recipient_identity_id = $1 AND active = TRUE
+	`, recipientIdentityID)
+	if err != nil {
+		return nil, err
+	}
+
+	replaced := make([]*service.RecipientMatchValue, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		sourceKind := value.SourceKind
+		if sourceKind == "" {
+			sourceKind = "manual"
+		}
+		sourceMetadata, err := marshalJSONB(value.SourceMetadata, []byte("{}"))
+		if err != nil {
+			return nil, err
+		}
+		row := tx.QueryRowContext(ctx, `
+			INSERT INTO mailbox_recipient_match_values (
+				recipient_identity_id,
+				match_type,
+				match_value,
+				normalized_value,
+				active,
+				priority,
+				source_kind,
+				source_metadata,
+				disabled_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+			RETURNING
+				id,
+				recipient_identity_id,
+				match_type,
+				match_value,
+				normalized_value,
+				active,
+				priority,
+				source_kind,
+				source_metadata,
+				created_at,
+				updated_at,
+				disabled_at
+		`, recipientIdentityID, value.MatchType, value.MatchValue, value.NormalizedValue, value.Active, value.Priority, sourceKind, string(sourceMetadata), value.DisabledAt)
+		created, err := scanRecipientMatchValue(row)
+		if err != nil {
+			return nil, err
+		}
+		replaced = append(replaced, created)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return replaced, nil
+}
+
+func (r *mailboxRepository) GetHeaderByID(ctx context.Context, id int64) (*service.MailHeader, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			collector_id,
+			capability_id,
+			remote_message_id,
+			folder,
+			sender,
+			recipients,
+			subject,
+			received_at,
+			flags,
+			snippet,
+			envelope_recipients,
+			delivered_to,
+			original_to,
+			resolved_recipient_identity_id,
+			resolved_address,
+			match_type,
+			matched_value_id,
+			resolution_source_field,
+			resolution_state,
+			detail_fetch_state,
+			created_at,
+			updated_at
+		FROM mailbox_header_cache
+		WHERE id = $1
+	`, id)
+
+	return scanMailHeader(row)
+}
+
 func (r *mailboxRepository) ListHeaders(ctx context.Context, filter service.MailHeaderListFilter) ([]*service.MailHeader, int64, error) {
 	if r == nil || r.db == nil {
 		return nil, 0, errors.New("mailbox repository db is nil")
@@ -816,6 +1077,54 @@ func (r *mailboxRepository) CreateSyncJobs(ctx context.Context, jobs []*service.
 	return created, nil
 }
 
+func (r *mailboxRepository) ListSyncJobsByBatchID(ctx context.Context, batchID string) ([]*service.MailSyncJob, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return []*service.MailSyncJob{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			id,
+			capability_id,
+			batch_id,
+			state,
+			trigger_source,
+			scheduled_for,
+			started_at,
+			finished_at,
+			retryable,
+			retry_count,
+			next_retry_at,
+			error_summary,
+			created_at,
+			updated_at
+		FROM mailbox_sync_jobs
+		WHERE batch_id = $1
+		ORDER BY scheduled_for ASC, id ASC
+	`, batchID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	jobs := make([]*service.MailSyncJob, 0)
+	for rows.Next() {
+		job, err := scanMailSyncJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
 func (r *mailboxRepository) ListActiveSyncJobs(ctx context.Context, capabilityID *int64, limit int) ([]*service.MailSyncJob, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
@@ -917,36 +1226,68 @@ func (r *mailboxRepository) ClaimDueCapabilities(ctx context.Context, now time.T
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
+		WITH candidates AS (
+			SELECT c.id
+			FROM mailbox_capabilities c
+			WHERE c.deleted_at IS NULL
+				AND c.sync_enabled = TRUE
+				AND c.next_sync_at IS NOT NULL
+				AND c.next_sync_at <= $1
+				AND NOT EXISTS (
+					SELECT 1
+					FROM mailbox_sync_jobs j
+					WHERE j.capability_id = c.id
+						AND j.state IN ($3, $4)
+				)
+			ORDER BY c.next_sync_at ASC, c.id ASC
+			LIMIT $2
+		), claimed AS (
+			UPDATE mailbox_capabilities c
+			SET
+				next_sync_at = $1 + (GREATEST(COALESCE(NULLIF(c.sync_interval_seconds, 0), $5), 1) * INTERVAL '1 second'),
+				updated_at = NOW()
+			FROM candidates
+			WHERE c.id = candidates.id
+				AND c.deleted_at IS NULL
+				AND c.sync_enabled = TRUE
+				AND c.next_sync_at IS NOT NULL
+				AND c.next_sync_at <= $1
+			RETURNING
+				c.id,
+				c.provider_account_id,
+				c.collector_id,
+				c.capability_kind,
+				c.connection_config,
+				c.cursor_state,
+				c.sync_enabled,
+				c.sync_interval_seconds,
+				c.next_sync_at,
+				c.last_sync_at,
+				c.health_state,
+				c.last_error,
+				c.created_at,
+				c.updated_at,
+				c.deleted_at
+		)
 		SELECT
-			c.id,
-			c.provider_account_id,
-			c.collector_id,
-			c.capability_kind,
-			c.connection_config,
-			c.cursor_state,
-			c.sync_enabled,
-			c.sync_interval_seconds,
-			c.next_sync_at,
-			c.last_sync_at,
-			c.health_state,
-			c.last_error,
-			c.created_at,
-			c.updated_at,
-			c.deleted_at
-		FROM mailbox_capabilities c
-		WHERE c.deleted_at IS NULL
-			AND c.sync_enabled = TRUE
-			AND c.next_sync_at IS NOT NULL
-			AND c.next_sync_at <= $1
-			AND NOT EXISTS (
-				SELECT 1
-				FROM mailbox_sync_jobs j
-				WHERE j.capability_id = c.id
-					AND j.state IN ($3, $4)
-			)
-		ORDER BY c.next_sync_at ASC, c.id ASC
-		LIMIT $2
-	`, now, limit, service.MailSyncJobStateQueued, service.MailSyncJobStateRunning)
+			id,
+			provider_account_id,
+			collector_id,
+			capability_kind,
+			connection_config,
+			cursor_state,
+			sync_enabled,
+			sync_interval_seconds,
+			next_sync_at,
+			last_sync_at,
+			health_state,
+			last_error,
+			created_at,
+			updated_at,
+			deleted_at
+		FROM claimed
+		ORDER BY next_sync_at ASC, id ASC
+	`, now, limit, service.MailSyncJobStateQueued, service.MailSyncJobStateRunning, defaultMailboxCapabilitySyncInterval)
 	if err != nil {
 		return nil, err
 	}
@@ -1116,6 +1457,37 @@ func scanRecipientIdentity(row sqlScanRow) (*service.RecipientIdentity, error) {
 	return &identity, nil
 }
 
+func scanRecipientMatchValue(row sqlScanRow) (*service.RecipientMatchValue, error) {
+	var value service.RecipientMatchValue
+	var sourceMetadataRaw []byte
+	var disabledAt sql.NullTime
+
+	err := row.Scan(
+		&value.ID,
+		&value.RecipientIdentityID,
+		&value.MatchType,
+		&value.MatchValue,
+		&value.NormalizedValue,
+		&value.Active,
+		&value.Priority,
+		&value.SourceKind,
+		&sourceMetadataRaw,
+		&value.CreatedAt,
+		&value.UpdatedAt,
+		&disabledAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	sourceMetadata, err := decodeRecipientMatchSourceMetadata(sourceMetadataRaw)
+	if err != nil {
+		return nil, err
+	}
+	value.SourceMetadata = sourceMetadata
+	value.DisabledAt = nullableTimePtr(disabledAt)
+	return &value, nil
+}
+
 func scanMailHeader(row sqlScanRow) (*service.MailHeader, error) {
 	var header service.MailHeader
 	var sender sql.NullString
@@ -1275,6 +1647,20 @@ func decodeMailboxCursorState(raw []byte) (service.MailboxCursorState, error) {
 	}
 	if out == nil {
 		return service.MailboxCursorState{}, nil
+	}
+	return out, nil
+}
+
+func decodeRecipientMatchSourceMetadata(raw []byte) (service.RecipientMatchSourceMetadata, error) {
+	if len(raw) == 0 {
+		return service.RecipientMatchSourceMetadata{}, nil
+	}
+	var out service.RecipientMatchSourceMetadata
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return service.RecipientMatchSourceMetadata{}, nil
 	}
 	return out, nil
 }

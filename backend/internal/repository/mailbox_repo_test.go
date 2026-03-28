@@ -134,6 +134,12 @@ func TestMailboxRepository_CreateSyncJobsReturnsIDsAndClaimDueCapabilitiesSkipsA
 	require.NoError(t, err)
 	require.Len(t, dueCapabilities, 1)
 	require.Equal(t, dueCapability.ID, dueCapabilities[0].ID)
+	require.NotNil(t, dueCapabilities[0].NextSyncAt)
+	require.True(t, dueCapabilities[0].NextSyncAt.After(now))
+
+	dueCapabilities, err = repo.ClaimDueCapabilities(ctx, now, 10)
+	require.NoError(t, err)
+	require.Empty(t, dueCapabilities)
 }
 
 func TestMailboxRepository_ListHeadersFiltersByCollectorAndFolder(t *testing.T) {
@@ -275,12 +281,18 @@ func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T
 
 	queuedJobs, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
 		CapabilityID:  capability.ID,
+		BatchID:       ptrString("batch-1"),
 		State:         service.MailSyncJobStateQueued,
 		TriggerSource: service.MailSyncTriggerSourceManual,
 		ScheduledFor:  time.Now().UTC(),
 	}})
 	require.NoError(t, err)
 	require.Len(t, queuedJobs, 1)
+
+	batchJobs, err := repo.ListSyncJobsByBatchID(ctx, "batch-1")
+	require.NoError(t, err)
+	require.Len(t, batchJobs, 1)
+	require.Equal(t, queuedJobs[0].ID, batchJobs[0].ID)
 
 	activeJobs, err := repo.ListActiveSyncJobs(ctx, &capability.ID, 10)
 	require.NoError(t, err)
@@ -307,6 +319,94 @@ func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T
 	collectors, err = repo.ListCollectors(ctx, false, 10)
 	require.NoError(t, err)
 	require.Empty(t, collectors)
+}
+
+func TestMailboxRepository_RecipientIdentityCRUDAndReplaceMatchValues(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+
+	identity, err := repo.CreateRecipientIdentity(ctx, &service.RecipientIdentity{
+		Name:           "Team Inbox",
+		NormalizedName: "team inbox",
+		Enabled:        true,
+	}, []*service.RecipientMatchValue{{
+		MatchType:       service.RecipientMatchTypeExactAddress,
+		MatchValue:      "team@example.com",
+		NormalizedValue: "team@example.com",
+		Active:          true,
+		Priority:        100,
+		SourceKind:      "manual",
+	}})
+	require.NoError(t, err)
+
+	gotIdentity, err := repo.GetRecipientIdentityByID(ctx, identity.ID)
+	require.NoError(t, err)
+	require.Equal(t, identity.ID, gotIdentity.ID)
+
+	matchValues, err := repo.ListRecipientMatchValues(ctx, identity.ID)
+	require.NoError(t, err)
+	require.Len(t, matchValues, 1)
+	require.Equal(t, "team@example.com", matchValues[0].NormalizedValue)
+
+	identity.Name = "Team Inbox Updated"
+	identity.Enabled = false
+	updatedIdentity, err := repo.UpdateRecipientIdentity(ctx, identity)
+	require.NoError(t, err)
+	require.Equal(t, "Team Inbox Updated", updatedIdentity.Name)
+	require.False(t, updatedIdentity.Enabled)
+
+	replacedValues, err := repo.ReplaceRecipientMatchValues(ctx, identity.ID, []*service.RecipientMatchValue{{
+		MatchType:       service.RecipientMatchTypeDomainSuffix,
+		MatchValue:      "example.org",
+		NormalizedValue: "example.org",
+		Active:          true,
+		Priority:        50,
+		SourceKind:      "manual",
+	}})
+	require.NoError(t, err)
+	require.Len(t, replacedValues, 1)
+	require.Equal(t, service.RecipientMatchTypeDomainSuffix, replacedValues[0].MatchType)
+
+	matchValues, err = repo.ListRecipientMatchValues(ctx, identity.ID)
+	require.NoError(t, err)
+	require.Len(t, matchValues, 1)
+	require.Equal(t, service.RecipientMatchTypeDomainSuffix, matchValues[0].MatchType)
+
+	identities, err := repo.ListRecipientIdentities(ctx, false, 10)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+
+	require.NoError(t, repo.DeleteRecipientIdentity(ctx, identity.ID))
+	identities, err = repo.ListRecipientIdentities(ctx, false, 10)
+	require.NoError(t, err)
+	require.Empty(t, identities)
+
+	identities, err = repo.ListRecipientIdentities(ctx, true, 10)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	require.NotNil(t, identities[0].DeletedAt)
+}
+
+func TestMailboxRepository_GetHeaderByIDReturnsHydratedDetail(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	capability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-detail"})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	headerID := mustInsertMailboxHeader(t, ctx, capability.CollectorID, capability.ID, mailboxHeaderSeed{
+		RemoteMessageID: "detail-1",
+		Folder:          "INBOX",
+		Subject:         "detail subject",
+		ReceivedAt:      now,
+		Recipients:      []string{"detail@example.com"},
+		Flags:           []string{"seen", "answered"},
+	})
+
+	header, err := repo.GetHeaderByID(ctx, headerID)
+	require.NoError(t, err)
+	require.Equal(t, headerID, header.ID)
+	require.Equal(t, []string{"detail@example.com"}, header.Recipients)
+	require.Equal(t, []string{"seen", "answered"}, header.Flags)
 }
 
 type mailboxCapabilitySeed struct {
@@ -425,7 +525,7 @@ func mustCreateMailboxCapability(t *testing.T, ctx context.Context, repo service
 	return capability
 }
 
-func mustInsertMailboxHeader(t *testing.T, ctx context.Context, collectorID, capabilityID int64, seed mailboxHeaderSeed) {
+func mustInsertMailboxHeader(t *testing.T, ctx context.Context, collectorID, capabilityID int64, seed mailboxHeaderSeed) int64 {
 	t.Helper()
 	recipientsJSON, err := json.Marshal(seed.Recipients)
 	require.NoError(t, err)
@@ -437,7 +537,8 @@ func mustInsertMailboxHeader(t *testing.T, ctx context.Context, collectorID, cap
 		seed.Snippet = "snippet"
 	}
 
-	_, err = integrationDB.ExecContext(ctx, `
+	var id int64
+	err = integrationDB.QueryRowContext(ctx, `
 		INSERT INTO mailbox_header_cache (
 			collector_id,
 			capability_id,
@@ -452,8 +553,10 @@ func mustInsertMailboxHeader(t *testing.T, ctx context.Context, collectorID, cap
 			delivered_to,
 			original_to
 		) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10::jsonb, $11::jsonb, $12::jsonb)
-	`, collectorID, capabilityID, seed.RemoteMessageID, seed.Folder, string(recipientsJSON), seed.Subject, seed.ReceivedAt, string(flagsJSON), seed.Snippet, string(emptyJSON), string(emptyJSON), string(emptyJSON))
+		RETURNING id
+	`, collectorID, capabilityID, seed.RemoteMessageID, seed.Folder, string(recipientsJSON), seed.Subject, seed.ReceivedAt, string(flagsJSON), seed.Snippet, string(emptyJSON), string(emptyJSON), string(emptyJSON)).Scan(&id)
 	require.NoError(t, err)
+	return id
 }
 
 func mailboxRowCount(t *testing.T, ctx context.Context, table string) int64 {
