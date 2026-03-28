@@ -96,6 +96,8 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "provider_kind")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "encrypted_payload")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_imported_at")
+	requireIndex(t, tx, "mailbox_provider_accounts", "uq_mailbox_provider_accounts_provider_external_active")
+	requireIndexDefinitionContains(t, tx, "uq_mailbox_provider_accounts_provider_external_active", "provider_kind", "external_account_id", "deleted_at")
 
 	requireTableExists(t, tx, "mailbox_collectors")
 	requireColumnExists(t, tx, "mailbox_collectors", "email_address")
@@ -109,6 +111,7 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	requireTableExists(t, tx, "mailbox_recipient_match_values")
 	requireColumnExists(t, tx, "mailbox_recipient_match_values", "recipient_identity_id")
 	requireIndex(t, tx, "mailbox_recipient_match_values", "uq_mailbox_recipient_exact_active")
+	requireIndexDefinitionContains(t, tx, "uq_mailbox_recipient_exact_active", "recipient_identity_id", "normalized_value", "match_type", "active")
 
 	requireTableExists(t, tx, "mailbox_header_cache")
 	requireColumnExists(t, tx, "mailbox_header_cache", "received_at")
@@ -153,6 +156,23 @@ SELECT EXISTS (
 `, table, index).Scan(&exists)
 	require.NoError(t, err, "query pg_indexes for %s.%s", table, index)
 	require.True(t, exists, "expected index %s on %s", index, table)
+}
+
+func requireIndexDefinitionContains(t *testing.T, tx *sql.Tx, index string, parts ...string) {
+	t.Helper()
+
+	var definition string
+	err := tx.QueryRowContext(context.Background(), `
+SELECT indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND indexname = $1
+`, index).Scan(&definition)
+	require.NoError(t, err, "query pg_indexes definition for %s", index)
+
+	for _, part := range parts {
+		require.Contains(t, definition, part, "expected index %s definition to contain %q", index, part)
+	}
 }
 
 func requireColumn(t *testing.T, tx *sql.Tx, table, column, dataType string, maxLen int, nullable bool) {

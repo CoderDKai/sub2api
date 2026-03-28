@@ -13,10 +13,12 @@ CREATE TABLE IF NOT EXISTS mailbox_provider_accounts (
     last_imported_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ,
-
-    UNIQUE(provider_kind, external_account_id)
+    deleted_at TIMESTAMPTZ
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mailbox_provider_accounts_provider_external_active
+    ON mailbox_provider_accounts (provider_kind, external_account_id)
+    WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS mailbox_collectors (
     id BIGSERIAL PRIMARY KEY,
@@ -87,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_mailbox_recipient_match_values_identity_id
     ON mailbox_recipient_match_values (recipient_identity_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_mailbox_recipient_exact_active
-    ON mailbox_recipient_match_values (normalized_value)
+    ON mailbox_recipient_match_values (recipient_identity_id, normalized_value)
     WHERE match_type = 'exact' AND active = TRUE;
 
 CREATE TABLE IF NOT EXISTS mailbox_header_cache (

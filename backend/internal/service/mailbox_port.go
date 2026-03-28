@@ -11,7 +11,7 @@ type ProviderAccount struct {
 	ExternalAccountID string     `json:"external_account_id"`
 	EncryptedPayload  string     `json:"encrypted_payload"`
 	PayloadVersion    int        `json:"payload_version"`
-	ImportCursor      string     `json:"import_cursor"`
+	ImportCursor      *string    `json:"import_cursor"`
 	LastImportedAt    *time.Time `json:"last_imported_at"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
@@ -35,10 +35,10 @@ type MailboxCapability struct {
 	CapabilityKind string     `json:"capability_kind"`
 	Folder         string     `json:"folder"`
 	SyncState      string     `json:"sync_state"`
-	ImportCursor   string     `json:"import_cursor"`
+	ImportCursor   *string    `json:"import_cursor"`
 	LastSyncedAt   *time.Time `json:"last_synced_at"`
-	NextSyncDueAt  *time.Time `json:"next_sync_due_at"`
-	LastError      string     `json:"last_error"`
+	NextSyncDueAt  time.Time  `json:"next_sync_due_at"`
+	LastError      *string    `json:"last_error"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	DeletedAt      *time.Time `json:"deleted_at"`
@@ -73,17 +73,17 @@ type MailHeader struct {
 	MatchedValueID        *int64     `json:"matched_value_id"`
 	Folder                string     `json:"folder"`
 	RemoteMessageID       string     `json:"remote_message_id"`
-	MessageID             string     `json:"message_id"`
+	MessageID             *string    `json:"message_id"`
 	ReceivedAt            time.Time  `json:"received_at"`
 	Snippet               string     `json:"snippet"`
 	Subject               string     `json:"subject"`
-	FromAddress           string     `json:"from_address"`
-	ResolvedAddress       string     `json:"resolved_address"`
+	FromAddress           *string    `json:"from_address"`
+	ResolvedAddress       *string    `json:"resolved_address"`
 	EnvelopeRecipients    []string   `json:"envelope_recipients"`
-	DeliveredTo           string     `json:"delivered_to"`
-	OriginalTo            string     `json:"original_to"`
-	MatchType             string     `json:"match_type"`
-	ResolutionSourceField string     `json:"resolution_source_field"`
+	DeliveredTo           *string    `json:"delivered_to"`
+	OriginalTo            *string    `json:"original_to"`
+	MatchType             *string    `json:"match_type"`
+	ResolutionSourceField *string    `json:"resolution_source_field"`
 	ResolutionState       string     `json:"resolution_state"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
@@ -102,7 +102,7 @@ type MailSyncJob struct {
 	RetryCount     int        `json:"retry_count"`
 	NextRetryAt    *time.Time `json:"next_retry_at"`
 	BackoffSeconds int        `json:"backoff_seconds"`
-	LastError      string     `json:"last_error"`
+	LastError      *string    `json:"last_error"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
