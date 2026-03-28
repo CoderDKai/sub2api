@@ -1,0 +1,103 @@
+name: Upstream Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Fork branch to update'
+        required: false
+        default: 'integration'
+        type: string
+      upstream_ref:
+        description: 'Upstream ref to merge'
+        required: false
+        default: 'upstream/main'
+        type: string
+  schedule:
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      TARGET_BRANCH: ${{ github.event.inputs.target_branch }}
+      UPSTREAM_REF: ${{ github.event.inputs.upstream_ref }}
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.target_branch || 'integration' }}
+          fetch-depth: 0
+
+      - name: Resolve workflow inputs
+        run: |
+          TARGET_BRANCH=${TARGET_BRANCH:-integration}
+          UPSTREAM_REF=${UPSTREAM_REF:-upstream/main}
+
+          echo "TARGET_BRANCH=${TARGET_BRANCH}" >> "$GITHUB_ENV"
+          echo "UPSTREAM_REF=${UPSTREAM_REF}" >> "$GITHUB_ENV"
+
+      - name: Configure remotes
+        run: |
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream https://github.com/Wei-Shaw/sub2api.git
+          else
+            git remote add upstream https://github.com/Wei-Shaw/sub2api.git
+          fi
+
+      - name: Fetch origin and upstream
+        run: |
+          git fetch origin "${TARGET_BRANCH}" --force
+          git fetch upstream --force
+
+      - name: Merge upstream into target branch
+        run: |
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-ff --no-edit "${UPSTREAM_REF}"
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+
+      - name: Verify Go version
+        run: |
+          go version | grep -q 'go1.26.1'
+
+      - name: Run backend unit tests
+        run: make -C backend test-unit
+
+      - name: Run backend integration tests
+        run: make -C backend test-integration
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --dir frontend run build
+
+      - name: Push synced branch
+        run: git push origin HEAD:${TARGET_BRANCH}

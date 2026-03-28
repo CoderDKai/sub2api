@@ -32,11 +32,14 @@ import (
 var embeddedVersion string
 
 // Build-time variables (can be set by ldflags)
+const defaultUpdateRepo = "CoderDKai/sub2api"
+
 var (
 	Version   = ""
 	Commit    = "unknown"
 	Date      = "unknown"
 	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
+	UpdateRepo = defaultUpdateRepo
 )
 
 func init() {
@@ -140,9 +143,18 @@ func runMainServer() {
 		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
 	}
 
+	resolvedUpdateRepo := strings.TrimSpace(UpdateRepo)
+	if resolvedUpdateRepo == "" {
+		resolvedUpdateRepo = defaultUpdateRepo
+	}
+	if err := os.Setenv("SUB2API_UPDATE_REPO", resolvedUpdateRepo); err != nil {
+		log.Fatalf("Failed to set update repo: %v", err)
+	}
+
 	buildInfo := handler.BuildInfo{
-		Version:   Version,
-		BuildType: BuildType,
+		Version:    Version,
+		BuildType:  BuildType,
+		UpdateRepo: resolvedUpdateRepo,
 	}
 
 	app, err := initializeApplication(buildInfo)

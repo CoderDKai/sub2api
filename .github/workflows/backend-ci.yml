@@ -21,11 +21,26 @@ jobs:
         run: |
           go version | grep -q 'go1.26.1'
       - name: Unit tests
-        working-directory: backend
-        run: make test-unit
+        run: make -C backend test-unit
       - name: Integration tests
-        working-directory: backend
-        run: make test-integration
+        run: make -C backend test-integration
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm --dir frontend run build
 
   golangci-lint:
     runs-on: ubuntu-latest

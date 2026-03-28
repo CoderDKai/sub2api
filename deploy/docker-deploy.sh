@@ -21,7 +21,12 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # GitHub raw content base URL
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy"
+DEFAULT_GITHUB_RAW_URL="https://raw.githubusercontent.com/CoderDKai/sub2api/main/deploy"
+SUB2API_REF="${SUB2API_REF:-main}"
+GITHUB_RAW_URL="${DEFAULT_GITHUB_RAW_URL}"
+if [ "$SUB2API_REF" != "main" ]; then
+    GITHUB_RAW_URL="https://raw.githubusercontent.com/CoderDKai/sub2api/${SUB2API_REF}/deploy"
+fi
 
 # Print colored message
 print_info() {

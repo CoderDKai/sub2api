@@ -22,9 +22,11 @@ builds:
       - amd64
     ldflags:
       - -s -w
+      - -X main.Version={{ .Version }}
       - -X main.Commit={{.Commit}}
       - -X main.Date={{.Date}}
       - -X main.BuildType=release
+      - -X main.UpdateRepo=CoderDKai/sub2api
 
 # 跳过 archives
 archives: []
@@ -53,7 +55,7 @@ dockers:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .Commit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}"
+      - "--label=org.opencontainers.image.source=https://github.com/CoderDKai/sub2api"
 
 # 跳过 manifests（单架构不需要）
 docker_manifests: []
@@ -83,6 +85,12 @@ release:
     docker pull ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/sub2api:{{ .Version }}
     ```
 
+    **One-line install (Linux):**
+    ```bash
+    curl -sSL https://raw.githubusercontent.com/CoderDKai/sub2api/{{ .Tag }}/deploy/install.sh | sudo bash
+    ```
+
     ## 📚 Documentation
 
+    - [Release Install Script](https://raw.githubusercontent.com/CoderDKai/sub2api/{{ .Tag }}/deploy/install.sh)
     - [GitHub Repository](https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }})
