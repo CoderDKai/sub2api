@@ -215,6 +215,7 @@ type MailboxRepository interface {
 	ListRecipientIdentities(ctx context.Context, opts MailboxListOptions) ([]*RecipientIdentity, error)
 	DeleteRecipientIdentity(ctx context.Context, id int64) error
 	ListRecipientMatchValues(ctx context.Context, recipientIdentityID int64) ([]*RecipientMatchValue, error)
+	ListActiveRecipientMatchValues(ctx context.Context) ([]*RecipientMatchValue, error)
 	ReplaceRecipientMatchValues(ctx context.Context, recipientIdentityID int64, values []*RecipientMatchValue) ([]*RecipientMatchValue, error)
 
 	GetHeaderByID(ctx context.Context, id int64) (*MailHeader, error)

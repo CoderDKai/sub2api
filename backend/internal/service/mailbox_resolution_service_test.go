@@ -76,3 +76,36 @@ func TestMailboxResolutionServiceAmbiguousHighPriorityFieldReturnsAmbiguous(t *t
 	require.Nil(t, result.Identity)
 	require.Equal(t, MailboxResolutionFieldEnvelope, result.SourceField)
 }
+
+func TestMailboxResolutionServiceLoadsMatchValuesInSingleBatch(t *testing.T) {
+	repo := newMailboxRepositoryStub()
+	repo.identities[1] = &RecipientIdentity{ID: 1, Name: "alias", Enabled: true}
+	repo.matchValues[1] = []*RecipientMatchValue{{
+		ID:                  11,
+		RecipientIdentityID: 1,
+		MatchType:           RecipientMatchTypeExactAddress,
+		MatchValue:          "alias@example.com",
+		NormalizedValue:     "alias@example.com",
+		Active:              true,
+		Priority:            100,
+	}}
+	repo.identities[2] = &RecipientIdentity{ID: 2, Name: "other", Enabled: true}
+	repo.matchValues[2] = []*RecipientMatchValue{{
+		ID:                  22,
+		RecipientIdentityID: 2,
+		MatchType:           RecipientMatchTypeDomainSuffix,
+		MatchValue:          "example.net",
+		NormalizedValue:     "example.net",
+		Active:              true,
+		Priority:            10,
+	}}
+
+	service := NewMailboxResolutionService(repo)
+	result, err := service.Resolve(context.Background(), MailboxRecipientResolutionInput{
+		EnvelopeRecipients: []string{"alias@example.com"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, MailResolutionStateResolved, result.State)
+	require.Equal(t, 1, repo.listAllMatchValueCalls)
+	require.Equal(t, 0, repo.listRecipientMatchValueCalls)
+}

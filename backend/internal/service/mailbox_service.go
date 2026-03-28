@@ -182,11 +182,11 @@ func (s *MailboxService) TestCapability(ctx context.Context, capabilityID int64)
 	}
 	client, err := s.providerClient(account.ProviderKind)
 	if err != nil {
-		return nil, err
+		return s.failCapabilityTest(ctx, capability, err)
 	}
 	profile, err := buildProviderProfile(account)
 	if err != nil {
-		return nil, err
+		return s.failCapabilityTest(ctx, capability, err)
 	}
 	_, listErr := client.ListHeaders(ctx, profile, mailboxpkg.CapabilityProfile{
 		Kind:             capability.CapabilityKind,
@@ -194,24 +194,35 @@ func (s *MailboxService) TestCapability(ctx context.Context, capabilityID int64)
 		CursorState:      mapFromMailboxCursorState(capability.CursorState),
 	}, 1)
 
-	updated := cloneMailboxCapabilityValue(capability)
-	now := s.now().UTC()
 	success := listErr == nil
 	if success {
+		updated := cloneMailboxCapabilityValue(capability)
+		now := s.now().UTC()
 		updated.HealthState = MailboxCapabilityStateHealthy
 		updated.LastError = nil
 		updated.LastSyncAt = &now
+		persisted, err := s.repo.UpdateCapability(ctx, updated)
+		if err != nil {
+			return nil, err
+		}
+		s.audit.RecordCapabilityTest(ctx, persisted, true)
+		return persisted, nil
 	} else {
-		message := listErr.Error()
-		updated.HealthState = MailboxCapabilityStateError
-		updated.LastError = &message
+		return s.failCapabilityTest(ctx, capability, listErr)
 	}
-	persisted, err := s.repo.UpdateCapability(ctx, updated)
-	if err != nil {
-		return nil, err
+}
+
+func (s *MailboxService) failCapabilityTest(ctx context.Context, capability *MailboxCapability, cause error) (*MailboxCapability, error) {
+	updated := cloneMailboxCapabilityValue(capability)
+	message := cause.Error()
+	updated.HealthState = MailboxCapabilityStateError
+	updated.LastError = &message
+	persisted, updateErr := s.repo.UpdateCapability(ctx, updated)
+	if updateErr != nil {
+		return nil, updateErr
 	}
-	s.audit.RecordCapabilityTest(ctx, persisted, success)
-	return persisted, nil
+	s.audit.RecordCapabilityTest(ctx, persisted, false)
+	return persisted, cause
 }
 
 func (s *MailboxService) prepareProviderAccount(current *ProviderAccount, input MailboxProviderUpsertInput) (*ProviderAccount, bool, error) {

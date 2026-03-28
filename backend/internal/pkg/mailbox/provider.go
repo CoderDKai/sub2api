@@ -37,11 +37,11 @@ type CapabilityProfile struct {
 }
 
 type ValidationResult struct {
-	Code              string
-	Message           string
+	Code               string
+	Message            string
 	ProviderIdentifier string
-	MailboxIdentifier string
-	InvalidateAccount bool
+	MailboxIdentifier  string
+	InvalidateAccount  bool
 }
 
 type Header struct {
@@ -150,4 +150,13 @@ func stringSliceValue(m map[string]any, key string) []string {
 		}
 	}
 	return out
+}
+
+func firstStringValue(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := stringValue(m, key); value != "" {
+			return value
+		}
+	}
+	return ""
 }

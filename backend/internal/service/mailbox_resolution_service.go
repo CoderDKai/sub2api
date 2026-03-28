@@ -89,21 +89,27 @@ func (s *MailboxResolutionService) loadResolutionEntries(ctx context.Context) ([
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]mailboxResolutionEntry, 0)
+	matchValues, err := s.repo.ListActiveRecipientMatchValues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	identityByID := make(map[int64]*RecipientIdentity, len(identities))
 	for _, identity := range identities {
 		if identity == nil || !identity.Enabled {
 			continue
 		}
-		values, err := s.repo.ListRecipientMatchValues(ctx, identity.ID)
-		if err != nil {
-			return nil, err
+		identityByID[identity.ID] = identity
+	}
+	entries := make([]mailboxResolutionEntry, 0)
+	for _, value := range matchValues {
+		if value == nil || !value.Active {
+			continue
 		}
-		for _, value := range values {
-			if value == nil || !value.Active {
-				continue
-			}
-			entries = append(entries, mailboxResolutionEntry{identity: identity, value: value})
+		identity, ok := identityByID[value.RecipientIdentityID]
+		if !ok {
+			continue
 		}
+		entries = append(entries, mailboxResolutionEntry{identity: identity, value: value})
 	}
 	return entries, nil
 }

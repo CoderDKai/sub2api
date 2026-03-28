@@ -16,7 +16,7 @@ import (
 func TestMicrosoftClientValidateSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/me", r.URL.Path)
-		require.Equal(t, "Bearer token-123", r.Header.Get("Authorization"))
+		require.Equal(t, "Bearer opaque-left----opaque-right", r.Header.Get("Authorization"))
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":                "provider-42",
 			"userPrincipalName": "boss@example.com",
@@ -27,9 +27,11 @@ func TestMicrosoftClientValidateSuccess(t *testing.T) {
 	client := NewMicrosoftClientWithBaseURL(server.Client(), server.URL)
 	result, err := client.Validate(context.Background(), ProviderProfile{
 		ProviderKind: "microsoft",
-		AuthKind:     "oauth2",
+		AuthKind:     "import_bundle",
 		Payload: map[string]any{
-			"access_token": "token-123",
+			"mailbox_identifier":  "boss@example.com",
+			"provider_identifier": "provider-42",
+			"token_bundle":        "opaque-left----opaque-right",
 		},
 	})
 	require.NoError(t, err)
@@ -39,10 +41,10 @@ func TestMicrosoftClientValidateSuccess(t *testing.T) {
 	require.Equal(t, "boss@example.com", result.MailboxIdentifier)
 }
 
-func TestMicrosoftClientListHeadersReadsInboxMinimalPath(t *testing.T) {
+func TestMicrosoftClientListHeadersUsesConnectionConfigFolder(t *testing.T) {
 	receivedTop := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/me/mailFolders/inbox/messages", r.URL.Path)
+		require.Equal(t, "/me/mailFolders/Archive/messages", r.URL.Path)
 		require.Equal(t, "Bearer token-123", r.Header.Get("Authorization"))
 		receivedTop = r.URL.Query().Get("$top")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -77,17 +79,48 @@ func TestMicrosoftClientListHeadersReadsInboxMinimalPath(t *testing.T) {
 		Payload: map[string]any{
 			"access_token": "token-123",
 		},
-	}, CapabilityProfile{Kind: "microsoft_inbox"}, 7)
+	}, CapabilityProfile{
+		Kind:             "microsoft_inbox",
+		ConnectionConfig: map[string]any{"folder": "Archive"},
+	}, 7)
 	require.NoError(t, err)
 	require.NotNil(t, page)
 	require.Equal(t, "7", receivedTop)
 	require.Len(t, page.Headers, 1)
 	require.Equal(t, "mail-1", page.Headers[0].RemoteMessageID)
-	require.Equal(t, "inbox", page.Headers[0].Folder)
+	require.Equal(t, "Archive", page.Headers[0].Folder)
 	require.Equal(t, "sender@example.com", page.Headers[0].Sender)
 	require.Equal(t, []string{"to@example.com", "cc@example.com"}, page.Headers[0].Recipients)
 	require.Equal(t, []string{"delivered@example.com"}, page.Headers[0].DeliveredTo)
 	require.Equal(t, []string{"original@example.com"}, page.Headers[0].OriginalTo)
 	require.Equal(t, "https://graph.example.com/next", page.NextCursor["next_link"])
 	require.Equal(t, time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC), page.Headers[0].ReceivedAt)
+}
+
+func TestMicrosoftClientListHeadersUsesCursorStateNextLink(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/custom/next", r.URL.Path)
+		require.Equal(t, "cursor-token", r.URL.Query().Get("page"))
+		require.Equal(t, "Bearer token-123", r.Header.Get("Authorization"))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"value": []map[string]any{},
+		})
+	}))
+	defer server.Close()
+
+	client := NewMicrosoftClientWithBaseURL(server.Client(), server.URL)
+	page, err := client.ListHeaders(context.Background(), ProviderProfile{
+		ProviderKind: "microsoft",
+		AuthKind:     "oauth2",
+		Payload: map[string]any{
+			"access_token": "token-123",
+		},
+	}, CapabilityProfile{
+		Kind:             "microsoft_inbox",
+		ConnectionConfig: map[string]any{"folder": "Inbox"},
+		CursorState:      map[string]any{"next_link": server.URL + "/custom/next?page=cursor-token"},
+	}, 7)
+	require.NoError(t, err)
+	require.NotNil(t, page)
+	require.Empty(t, page.Headers)
 }

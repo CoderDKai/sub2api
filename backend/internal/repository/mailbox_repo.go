@@ -874,6 +874,48 @@ func (r *mailboxRepository) ListRecipientMatchValues(ctx context.Context, recipi
 	return values, nil
 }
 
+func (r *mailboxRepository) ListActiveRecipientMatchValues(ctx context.Context) ([]*service.RecipientMatchValue, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			id,
+			recipient_identity_id,
+			match_type,
+			match_value,
+			normalized_value,
+			active,
+			priority,
+			source_kind,
+			source_metadata,
+			created_at,
+			updated_at,
+			disabled_at
+		FROM mailbox_recipient_match_values
+		WHERE active = TRUE
+		ORDER BY recipient_identity_id ASC, priority DESC, id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	values := make([]*service.RecipientMatchValue, 0)
+	for rows.Next() {
+		value, err := scanRecipientMatchValue(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
 func (r *mailboxRepository) ReplaceRecipientMatchValues(ctx context.Context, recipientIdentityID int64, values []*service.RecipientMatchValue) ([]*service.RecipientMatchValue, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")

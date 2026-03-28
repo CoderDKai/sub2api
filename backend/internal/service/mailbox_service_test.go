@@ -195,12 +195,78 @@ func TestMailboxServiceTestCapabilitySuccessUpdatesHealth(t *testing.T) {
 	require.Contains(t, audit.events, "capability_test")
 }
 
+func TestMailboxServiceTestCapabilityMarksErrorWhenProviderProfileInvalid(t *testing.T) {
+	repo := newMailboxRepositoryStub()
+	repo.providers[1] = &ProviderAccount{
+		ID:               1,
+		DisplayName:      "Microsoft",
+		ProviderKind:     MailboxProviderKindMicrosoft,
+		AuthKind:         ProviderAuthKindOAuth2,
+		Status:           ProviderAccountStatusActive,
+		EncryptedPayload: `{"access_token":`,
+	}
+	repo.capabilities[7] = &MailboxCapability{
+		ID:                7,
+		ProviderAccountID: 1,
+		CollectorID:       2,
+		CapabilityKind:    "microsoft_inbox",
+		ConnectionConfig:  MailboxConnectionConfig{"folder": "INBOX"},
+		CursorState:       MailboxCursorState{},
+		HealthState:       MailboxCapabilityStateHealthy,
+	}
+	audit := &mailboxAuditStub{}
+	service := newMailboxServiceForTest(repo, audit, map[string]mailboxpkg.ProviderClient{
+		MailboxProviderKindMicrosoft: &providerClientStub{},
+	})
+
+	updated, err := service.TestCapability(context.Background(), 7)
+	require.Error(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, MailboxCapabilityStateError, updated.HealthState)
+	require.NotNil(t, updated.LastError)
+	require.Contains(t, *updated.LastError, "decode provider payload")
+	require.Contains(t, audit.events, "capability_test")
+}
+
+func TestMailboxServiceTestCapabilityMarksErrorWhenProviderClientMissing(t *testing.T) {
+	repo := newMailboxRepositoryStub()
+	repo.providers[1] = &ProviderAccount{
+		ID:               1,
+		DisplayName:      "Microsoft",
+		ProviderKind:     MailboxProviderKindMicrosoft,
+		AuthKind:         ProviderAuthKindOAuth2,
+		Status:           ProviderAccountStatusActive,
+		EncryptedPayload: `{"access_token":"token"}`,
+	}
+	repo.capabilities[7] = &MailboxCapability{
+		ID:                7,
+		ProviderAccountID: 1,
+		CollectorID:       2,
+		CapabilityKind:    "microsoft_inbox",
+		ConnectionConfig:  MailboxConnectionConfig{"folder": "INBOX"},
+		CursorState:       MailboxCursorState{},
+		HealthState:       MailboxCapabilityStateHealthy,
+	}
+	audit := &mailboxAuditStub{}
+	service := newMailboxServiceForTest(repo, audit, nil)
+
+	updated, err := service.TestCapability(context.Background(), 7)
+	require.ErrorIs(t, err, ErrMailboxUnsupportedProvider)
+	require.NotNil(t, updated)
+	require.Equal(t, MailboxCapabilityStateError, updated.HealthState)
+	require.NotNil(t, updated.LastError)
+	require.Contains(t, *updated.LastError, ErrMailboxUnsupportedProvider.Error())
+	require.Contains(t, audit.events, "capability_test")
+}
+
 type mailboxRepositoryStub struct {
 	providers         map[int64]*ProviderAccount
 	collectors        map[int64]*CollectorMailbox
 	capabilities      map[int64]*MailboxCapability
 	identities        map[int64]*RecipientIdentity
 	matchValues       map[int64][]*RecipientMatchValue
+	listRecipientMatchValueCalls int
+	listAllMatchValueCalls int
 	nextProviderID    int64
 	nextCollectorID   int64
 	nextCapabilityID  int64
@@ -383,10 +449,25 @@ func (r *mailboxRepositoryStub) DeleteRecipientIdentity(ctx context.Context, id 
 }
 
 func (r *mailboxRepositoryStub) ListRecipientMatchValues(ctx context.Context, recipientIdentityID int64) ([]*RecipientMatchValue, error) {
+	r.listRecipientMatchValueCalls++
 	values := r.matchValues[recipientIdentityID]
 	cloned := make([]*RecipientMatchValue, 0, len(values))
 	for _, value := range values {
 		cloned = append(cloned, cloneRecipientMatchValue(value))
+	}
+	return cloned, nil
+}
+
+func (r *mailboxRepositoryStub) ListActiveRecipientMatchValues(ctx context.Context) ([]*RecipientMatchValue, error) {
+	r.listAllMatchValueCalls++
+	cloned := make([]*RecipientMatchValue, 0)
+	for _, values := range r.matchValues {
+		for _, value := range values {
+			if value == nil || !value.Active {
+				continue
+			}
+			cloned = append(cloned, cloneRecipientMatchValue(value))
+		}
 	}
 	return cloned, nil
 }

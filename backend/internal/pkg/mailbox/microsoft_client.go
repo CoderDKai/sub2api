@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 )
@@ -62,11 +63,11 @@ func NewMicrosoftClientWithBaseURL(httpClient *http.Client, baseURL string) *Mic
 }
 
 func (c *MicrosoftClient) Validate(ctx context.Context, profile ProviderProfile) (*ValidationResult, error) {
-	accessToken := stringValue(profile.Payload, "access_token")
+	accessToken := microsoftBearerToken(profile)
 	if accessToken == "" {
 		return &ValidationResult{
 			Code:              ValidationCodeInvalidFormat,
-			Message:           "access_token is required",
+			Message:           "microsoft token is required",
 			InvalidateAccount: true,
 		}, nil
 	}
@@ -102,27 +103,33 @@ func (c *MicrosoftClient) Validate(ctx context.Context, profile ProviderProfile)
 	}
 	return &ValidationResult{
 		Code:               ValidationCodeOK,
-		ProviderIdentifier: strings.TrimSpace(body.ID),
-		MailboxIdentifier:  mailboxIdentifier,
+		ProviderIdentifier: coalesceMicrosoftIdentifier(strings.TrimSpace(body.ID), profile.ProviderIdentifier, stringValue(profile.Payload, "provider_identifier")),
+		MailboxIdentifier:  coalesceMicrosoftIdentifier(mailboxIdentifier, profile.MailboxIdentifier, stringValue(profile.Payload, "mailbox_identifier")),
 	}, nil
 }
 
 func (c *MicrosoftClient) ListHeaders(ctx context.Context, profile ProviderProfile, capability CapabilityProfile, limit int) (*HeaderPage, error) {
-	accessToken := stringValue(profile.Payload, "access_token")
+	accessToken := microsoftBearerToken(profile)
 	if accessToken == "" {
-		return nil, fmt.Errorf("access_token is required")
+		return nil, fmt.Errorf("microsoft token is required")
 	}
 	if limit <= 0 {
 		limit = 1
 	}
-	endpoint, err := url.Parse(c.baseURL + "/me/mailFolders/inbox/messages")
+	requestURL := strings.TrimSpace(stringValue(capability.CursorState, "next_link"))
+	if requestURL == "" {
+		requestURL = c.mailFolderMessagesURL(stringValue(capability.ConnectionConfig, "folder"))
+	}
+	endpoint, err := url.Parse(requestURL)
 	if err != nil {
 		return nil, err
 	}
-	query := endpoint.Query()
-	query.Set("$top", fmt.Sprintf("%d", limit))
-	query.Set("$select", "id,subject,bodyPreview,receivedDateTime,from,toRecipients,ccRecipients,internetMessageHeaders")
-	endpoint.RawQuery = query.Encode()
+	if strings.TrimSpace(stringValue(capability.CursorState, "next_link")) == "" {
+		query := endpoint.Query()
+		query.Set("$top", fmt.Sprintf("%d", limit))
+		query.Set("$select", "id,subject,bodyPreview,receivedDateTime,from,toRecipients,ccRecipients,internetMessageHeaders")
+		endpoint.RawQuery = query.Encode()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
@@ -151,9 +158,13 @@ func (c *MicrosoftClient) ListHeaders(ctx context.Context, profile ProviderProfi
 		if err != nil {
 			receivedAt = time.Time{}
 		}
+		folder := strings.TrimSpace(stringValue(capability.ConnectionConfig, "folder"))
+		if folder == "" {
+			folder = "inbox"
+		}
 		header := Header{
 			RemoteMessageID: strings.TrimSpace(message.ID),
-			Folder:          "inbox",
+			Folder:          folder,
 			Sender:          strings.TrimSpace(message.From.EmailAddress.Address),
 			Recipients:      collectMicrosoftAddresses(message.ToRecipients, message.CCRecipients),
 			Subject:         strings.TrimSpace(message.Subject),
@@ -168,6 +179,33 @@ func (c *MicrosoftClient) ListHeaders(ctx context.Context, profile ProviderProfi
 		page.NextCursor["next_link"] = strings.TrimSpace(body.NextLink)
 	}
 	return page, nil
+}
+
+func (c *MicrosoftClient) mailFolderMessagesURL(folder string) string {
+	folder = strings.TrimSpace(folder)
+	if folder == "" {
+		folder = "inbox"
+	}
+	base, err := url.Parse(c.baseURL)
+	if err != nil {
+		return c.baseURL + "/me/mailFolders/" + url.PathEscape(folder) + "/messages"
+	}
+	base.Path = path.Join(base.Path, "me", "mailFolders", folder, "messages")
+	return base.String()
+}
+
+func microsoftBearerToken(profile ProviderProfile) string {
+	return firstStringValue(profile.Payload, "access_token", "token_bundle")
+}
+
+func coalesceMicrosoftIdentifier(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func collectMicrosoftAddresses(groups ...[]microsoftAddressContainer) []string {
