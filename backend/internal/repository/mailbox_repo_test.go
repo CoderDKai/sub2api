@@ -390,6 +390,74 @@ func TestMailboxRepository_DeletedParentHidesCapabilitiesFromListAndClaim(t *tes
 	}
 }
 
+func TestMailboxRepository_CreateOrUpdateCapabilityRejectsDeletedParents(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	nextSyncAt := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Microsecond)
+
+	deletedProvider := mustCreateMailboxProviderAccount(t, ctx, repo)
+	activeCollector := mustCreateMailboxCollector(t, ctx, repo)
+	require.NoError(t, repo.DeleteProviderAccount(ctx, deletedProvider.ID))
+
+	_, err := repo.CreateCapability(ctx, &service.MailboxCapability{
+		ProviderAccountID:   deletedProvider.ID,
+		CollectorID:         activeCollector.ID,
+		CapabilityKind:      "imap-deleted-provider",
+		ConnectionConfig:    service.MailboxConnectionConfig{"host": "imap.example.com"},
+		CursorState:         service.MailboxCursorState{},
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 300,
+		NextSyncAt:          &nextSyncAt,
+		HealthState:         service.MailboxCapabilityStateHealthy,
+	})
+	require.Error(t, err)
+
+	activeProvider := mustCreateMailboxProviderAccount(t, ctx, repo)
+	deletedCollector := mustCreateMailboxCollector(t, ctx, repo)
+	require.NoError(t, repo.DeleteCollector(ctx, deletedCollector.ID))
+
+	_, err = repo.CreateCapability(ctx, &service.MailboxCapability{
+		ProviderAccountID:   activeProvider.ID,
+		CollectorID:         deletedCollector.ID,
+		CapabilityKind:      "imap-deleted-collector",
+		ConnectionConfig:    service.MailboxConnectionConfig{"host": "imap.example.com"},
+		CursorState:         service.MailboxCursorState{},
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 300,
+		NextSyncAt:          &nextSyncAt,
+		HealthState:         service.MailboxCapabilityStateHealthy,
+	})
+	require.Error(t, err)
+
+	providerForUpdate := mustCreateMailboxProviderAccount(t, ctx, repo)
+	collectorForUpdate := mustCreateMailboxCollector(t, ctx, repo)
+	capability, err := repo.CreateCapability(ctx, &service.MailboxCapability{
+		ProviderAccountID:   providerForUpdate.ID,
+		CollectorID:         collectorForUpdate.ID,
+		CapabilityKind:      "imap-update-check",
+		ConnectionConfig:    service.MailboxConnectionConfig{"host": "imap.example.com"},
+		CursorState:         service.MailboxCursorState{},
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 300,
+		NextSyncAt:          &nextSyncAt,
+		HealthState:         service.MailboxCapabilityStateHealthy,
+	})
+	require.NoError(t, err)
+
+	deletedUpdateProvider := mustCreateMailboxProviderAccount(t, ctx, repo)
+	require.NoError(t, repo.DeleteProviderAccount(ctx, deletedUpdateProvider.ID))
+	capability.ProviderAccountID = deletedUpdateProvider.ID
+	_, err = repo.UpdateCapability(ctx, capability)
+	require.Error(t, err)
+
+	capability.ProviderAccountID = providerForUpdate.ID
+	deletedUpdateCollector := mustCreateMailboxCollector(t, ctx, repo)
+	require.NoError(t, repo.DeleteCollector(ctx, deletedUpdateCollector.ID))
+	capability.CollectorID = deletedUpdateCollector.ID
+	_, err = repo.UpdateCapability(ctx, capability)
+	require.Error(t, err)
+}
+
 func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)

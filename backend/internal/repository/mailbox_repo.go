@@ -437,6 +437,9 @@ func (r *mailboxRepository) CreateCapability(ctx context.Context, capability *se
 	if capability == nil {
 		return nil, errors.New("capability is nil")
 	}
+	if err := r.ensureCapabilityParentsActive(ctx, capability.ProviderAccountID, capability.CollectorID); err != nil {
+		return nil, err
+	}
 
 	connectionConfig, err := marshalJSONB(capability.ConnectionConfig, []byte("{}"))
 	if err != nil {
@@ -529,6 +532,9 @@ func (r *mailboxRepository) UpdateCapability(ctx context.Context, capability *se
 	}
 	if capability == nil {
 		return nil, errors.New("capability is nil")
+	}
+	if err := r.ensureCapabilityParentsActive(ctx, capability.ProviderAccountID, capability.CollectorID); err != nil {
+		return nil, err
 	}
 
 	connectionConfig, err := marshalJSONB(capability.ConnectionConfig, []byte("{}"))
@@ -1722,6 +1728,38 @@ func decodeRecipientMatchSourceMetadata(raw []byte) (service.RecipientMatchSourc
 		return service.RecipientMatchSourceMetadata{}, nil
 	}
 	return out, nil
+}
+
+func (r *mailboxRepository) ensureCapabilityParentsActive(ctx context.Context, providerAccountID, collectorID int64) error {
+	if r == nil || r.db == nil {
+		return errors.New("mailbox repository db is nil")
+	}
+
+	var providerActive bool
+	var collectorActive bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT
+			EXISTS (
+				SELECT 1
+				FROM mailbox_provider_accounts
+				WHERE id = $1 AND deleted_at IS NULL
+			),
+			EXISTS (
+				SELECT 1
+				FROM mailbox_collectors
+				WHERE id = $2 AND deleted_at IS NULL
+			)
+	`, providerAccountID, collectorID).Scan(&providerActive, &collectorActive)
+	if err != nil {
+		return err
+	}
+	if !providerActive {
+		return errors.New("provider account is deleted or missing")
+	}
+	if !collectorActive {
+		return errors.New("collector is deleted or missing")
+	}
+	return nil
 }
 
 func normalizeOptionalStringArg(v *string) any {
