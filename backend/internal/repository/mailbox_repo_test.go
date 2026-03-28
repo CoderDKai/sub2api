@@ -569,8 +569,20 @@ func TestMailboxRepository_SyncJobsRejectDeletedCapabilityAndHideDeletedParentJo
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	deletedCapability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-deleted-cap"})
-	require.NoError(t, repo.DeleteCapability(ctx, deletedCapability.ID))
 	_, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
+		CapabilityID:  deletedCapability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceManual,
+		ScheduledFor:  now,
+	}})
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteCapability(ctx, deletedCapability.ID))
+
+	activeJobs, err := repo.ListActiveSyncJobs(ctx, nil, 10)
+	require.NoError(t, err)
+	require.Empty(t, activeJobs)
+
+	_, err = repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
 		CapabilityID:  deletedCapability.ID,
 		State:         service.MailSyncJobStateQueued,
 		TriggerSource: service.MailSyncTriggerSourceManual,
@@ -608,7 +620,7 @@ func TestMailboxRepository_SyncJobsRejectDeletedCapabilityAndHideDeletedParentJo
 
 	require.NoError(t, repo.DeleteProviderAccount(ctx, providerAccount.ID))
 
-	activeJobs, err := repo.ListActiveSyncJobs(ctx, nil, 10)
+	activeJobs, err = repo.ListActiveSyncJobs(ctx, nil, 10)
 	require.NoError(t, err)
 	require.Len(t, activeJobs, 1)
 	require.Equal(t, activeCapability.ID, activeJobs[0].CapabilityID)
