@@ -169,7 +169,7 @@ func (r *mailboxRepository) UpdateProviderAccount(ctx context.Context, account *
 	return scanProviderAccount(row)
 }
 
-func (r *mailboxRepository) ListProviderAccounts(ctx context.Context, includeDeleted bool, limit int) ([]*service.ProviderAccount, error) {
+func (r *mailboxRepository) ListProviderAccounts(ctx context.Context, opts service.MailboxListOptions) ([]*service.ProviderAccount, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
 	}
@@ -193,11 +193,11 @@ func (r *mailboxRepository) ListProviderAccounts(ctx context.Context, includeDel
 			deleted_at
 		FROM mailbox_provider_accounts`
 	args := make([]any, 0, 1)
-	if !includeDeleted {
+	if !opts.IncludeDeleted {
 		query += ` WHERE deleted_at IS NULL`
 	}
-	query += ` ORDER BY id ASC LIMIT $1`
-	args = append(args, normalizeMailboxListLimit(limit))
+	query += ` ORDER BY id ASC LIMIT $1 OFFSET $2`
+	args = append(args, normalizeMailboxListLimit(opts.Limit), normalizeMailboxListOffset(opts.Offset))
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -331,7 +331,7 @@ func (r *mailboxRepository) UpdateCollector(ctx context.Context, collector *serv
 	return scanCollector(row)
 }
 
-func (r *mailboxRepository) ListCollectors(ctx context.Context, includeDeleted bool, limit int) ([]*service.CollectorMailbox, error) {
+func (r *mailboxRepository) ListCollectors(ctx context.Context, opts service.MailboxListOptions) ([]*service.CollectorMailbox, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
 	}
@@ -347,12 +347,12 @@ func (r *mailboxRepository) ListCollectors(ctx context.Context, includeDeleted b
 			updated_at,
 			deleted_at
 		FROM mailbox_collectors`
-	if !includeDeleted {
+	if !opts.IncludeDeleted {
 		query += ` WHERE deleted_at IS NULL`
 	}
-	query += ` ORDER BY id ASC LIMIT $1`
+	query += ` ORDER BY id ASC LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(limit))
+	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(opts.Limit), normalizeMailboxListOffset(opts.Offset))
 	if err != nil {
 		return nil, err
 	}
@@ -543,7 +543,7 @@ func (r *mailboxRepository) UpdateCapability(ctx context.Context, capability *se
 	return scanMailboxCapability(row)
 }
 
-func (r *mailboxRepository) ListCapabilities(ctx context.Context, includeDeleted bool, limit int) ([]*service.MailboxCapability, error) {
+func (r *mailboxRepository) ListCapabilities(ctx context.Context, opts service.MailboxListOptions) ([]*service.MailboxCapability, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
 	}
@@ -566,12 +566,12 @@ func (r *mailboxRepository) ListCapabilities(ctx context.Context, includeDeleted
 			updated_at,
 			deleted_at
 		FROM mailbox_capabilities`
-	if !includeDeleted {
+	if !opts.IncludeDeleted {
 		query += ` WHERE deleted_at IS NULL`
 	}
-	query += ` ORDER BY id ASC LIMIT $1`
+	query += ` ORDER BY id ASC LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(limit))
+	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(opts.Limit), normalizeMailboxListOffset(opts.Offset))
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +707,7 @@ func (r *mailboxRepository) UpdateRecipientIdentity(ctx context.Context, in *ser
 	return scanRecipientIdentity(row)
 }
 
-func (r *mailboxRepository) ListRecipientIdentities(ctx context.Context, includeDeleted bool, limit int) ([]*service.RecipientIdentity, error) {
+func (r *mailboxRepository) ListRecipientIdentities(ctx context.Context, opts service.MailboxListOptions) ([]*service.RecipientIdentity, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
 	}
@@ -715,12 +715,12 @@ func (r *mailboxRepository) ListRecipientIdentities(ctx context.Context, include
 	query := `
 		SELECT id, name, normalized_name, enabled, created_at, updated_at, deleted_at
 		FROM mailbox_recipient_identities`
-	if !includeDeleted {
+	if !opts.IncludeDeleted {
 		query += ` WHERE deleted_at IS NULL`
 	}
-	query += ` ORDER BY id ASC LIMIT $1`
+	query += ` ORDER BY id ASC LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(limit))
+	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(opts.Limit), normalizeMailboxListOffset(opts.Offset))
 	if err != nil {
 		return nil, err
 	}
@@ -949,7 +949,8 @@ func (r *mailboxRepository) ListHeaders(ctx context.Context, filter service.Mail
 	if limit <= 0 {
 		limit = defaultMailboxHeaderListLimit
 	}
-	selectArgs := append(append([]any(nil), args...), limit)
+	offset := normalizeMailboxListOffset(filter.Offset)
+	selectArgs := append(append([]any(nil), args...), limit, offset)
 	query := `
 		SELECT
 			id,
@@ -978,7 +979,7 @@ func (r *mailboxRepository) ListHeaders(ctx context.Context, filter service.Mail
 		FROM mailbox_header_cache h
 		WHERE ` + whereClause + `
 		ORDER BY h.received_at DESC, h.id DESC
-		LIMIT $` + fmt.Sprintf("%d", len(selectArgs))
+		LIMIT $` + fmt.Sprintf("%d", len(selectArgs)-1) + ` OFFSET $` + fmt.Sprintf("%d", len(selectArgs))
 
 	rows, err := r.db.QueryContext(ctx, query, selectArgs...)
 	if err != nil {
@@ -1670,6 +1671,13 @@ func normalizeMailboxListLimit(limit int) int {
 		return defaultMailboxHeaderListLimit
 	}
 	return limit
+}
+
+func normalizeMailboxListOffset(offset int) int {
+	if offset <= 0 {
+		return 0
+	}
+	return offset
 }
 
 func ensureRowsAffected(res sql.Result) error {

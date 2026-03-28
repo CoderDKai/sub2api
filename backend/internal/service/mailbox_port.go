@@ -173,7 +173,14 @@ type MailHeaderListFilter struct {
 	CollectorID  *int64
 	CapabilityID *int64
 	Folder       string
+	Offset       int
 	Limit        int
+}
+
+type MailboxListOptions struct {
+	IncludeDeleted bool
+	Offset         int
+	Limit          int
 }
 
 type MailboxProvider interface {
@@ -185,10 +192,38 @@ type MailboxProvider interface {
 
 type MailboxRepository interface {
 	CreateProviderAccount(ctx context.Context, account *ProviderAccount) (*ProviderAccount, error)
+	GetProviderAccountByID(ctx context.Context, id int64) (*ProviderAccount, error)
+	UpdateProviderAccount(ctx context.Context, account *ProviderAccount) (*ProviderAccount, error)
+	ListProviderAccounts(ctx context.Context, opts MailboxListOptions) ([]*ProviderAccount, error)
+	DeleteProviderAccount(ctx context.Context, id int64) error
+
 	CreateCollector(ctx context.Context, collector *CollectorMailbox) (*CollectorMailbox, error)
+	GetCollectorByID(ctx context.Context, id int64) (*CollectorMailbox, error)
+	UpdateCollector(ctx context.Context, collector *CollectorMailbox) (*CollectorMailbox, error)
+	ListCollectors(ctx context.Context, opts MailboxListOptions) ([]*CollectorMailbox, error)
+	DeleteCollector(ctx context.Context, id int64) error
+
 	CreateCapability(ctx context.Context, capability *MailboxCapability) (*MailboxCapability, error)
+	GetCapabilityByID(ctx context.Context, id int64) (*MailboxCapability, error)
+	UpdateCapability(ctx context.Context, capability *MailboxCapability) (*MailboxCapability, error)
+	ListCapabilities(ctx context.Context, opts MailboxListOptions) ([]*MailboxCapability, error)
+	DeleteCapability(ctx context.Context, id int64) error
+
 	CreateRecipientIdentity(ctx context.Context, in *RecipientIdentity, values []*RecipientMatchValue) (*RecipientIdentity, error)
+	GetRecipientIdentityByID(ctx context.Context, id int64) (*RecipientIdentity, error)
+	UpdateRecipientIdentity(ctx context.Context, in *RecipientIdentity) (*RecipientIdentity, error)
+	ListRecipientIdentities(ctx context.Context, opts MailboxListOptions) ([]*RecipientIdentity, error)
+	DeleteRecipientIdentity(ctx context.Context, id int64) error
+	ListRecipientMatchValues(ctx context.Context, recipientIdentityID int64) ([]*RecipientMatchValue, error)
+	ReplaceRecipientMatchValues(ctx context.Context, recipientIdentityID int64, values []*RecipientMatchValue) ([]*RecipientMatchValue, error)
+
+	GetHeaderByID(ctx context.Context, id int64) (*MailHeader, error)
 	ListHeaders(ctx context.Context, filter MailHeaderListFilter) ([]*MailHeader, int64, error)
+
 	CreateSyncJobs(ctx context.Context, jobs []*MailSyncJob) ([]*MailSyncJob, error)
+	ListSyncJobsByBatchID(ctx context.Context, batchID string) ([]*MailSyncJob, error)
+	ListActiveSyncJobs(ctx context.Context, capabilityID *int64, limit int) ([]*MailSyncJob, error)
+	UpdateSyncJobState(ctx context.Context, jobID int64, state string, startedAt, finishedAt, nextRetryAt *time.Time, errorSummary *string) (*MailSyncJob, error)
+
 	ClaimDueCapabilities(ctx context.Context, now time.Time, limit int) ([]*MailboxCapability, error)
 }

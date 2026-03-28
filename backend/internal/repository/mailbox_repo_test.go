@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var _ service.MailboxRepository = (*mailboxRepository)(nil)
+
 func TestMailboxRepository_CreateCapabilityAssociatesProviderAccount(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)
@@ -215,19 +217,26 @@ func TestMailboxRepository_ProviderAccountCRUDAndList(t *testing.T) {
 	require.Equal(t, updatedName, updated.DisplayName)
 	require.Equal(t, updatedStatus, updated.Status)
 
-	accounts, err := repo.ListProviderAccounts(ctx, false, 10)
+	accounts, err := repo.ListProviderAccounts(ctx, service.MailboxListOptions{Offset: 0, Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
 	require.Equal(t, account.ID, accounts[0].ID)
 
-	require.NoError(t, repo.DeleteProviderAccount(ctx, account.ID))
-	accounts, err = repo.ListProviderAccounts(ctx, false, 10)
+	secondAccount := mustCreateMailboxProviderAccount(t, ctx, repo)
+	pagedAccounts, err := repo.ListProviderAccounts(ctx, service.MailboxListOptions{Offset: 1, Limit: 1})
 	require.NoError(t, err)
-	require.Empty(t, accounts)
+	require.Len(t, pagedAccounts, 1)
+	require.Equal(t, secondAccount.ID, pagedAccounts[0].ID)
 
-	accounts, err = repo.ListProviderAccounts(ctx, true, 10)
+	require.NoError(t, repo.DeleteProviderAccount(ctx, account.ID))
+	accounts, err = repo.ListProviderAccounts(ctx, service.MailboxListOptions{Offset: 0, Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
+	require.Equal(t, secondAccount.ID, accounts[0].ID)
+
+	accounts, err = repo.ListProviderAccounts(ctx, service.MailboxListOptions{IncludeDeleted: true, Offset: 0, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, accounts, 2)
 	require.NotNil(t, accounts[0].DeletedAt)
 }
 
@@ -246,10 +255,11 @@ func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, collector.ID, gotCollector.ID)
 
-	collectors, err := repo.ListCollectors(ctx, false, 10)
+	secondCollector := mustCreateMailboxCollector(t, ctx, repo)
+	collectors, err := repo.ListCollectors(ctx, service.MailboxListOptions{Offset: 1, Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, collectors, 1)
-	require.Equal(t, collector.ID, collectors[0].ID)
+	require.Equal(t, secondCollector.ID, collectors[0].ID)
 
 	nextSyncAt := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Microsecond)
 	capability, err := repo.CreateCapability(ctx, &service.MailboxCapability{
@@ -275,9 +285,21 @@ func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, service.MailboxCapabilityStateWarning, updatedCapability.HealthState)
 
-	capabilities, err := repo.ListCapabilities(ctx, false, 10)
+	otherCapability, err := repo.CreateCapability(ctx, &service.MailboxCapability{
+		ProviderAccountID:   account.ID,
+		CollectorID:         secondCollector.ID,
+		CapabilityKind:      "imap-crud-2",
+		ConnectionConfig:    service.MailboxConnectionConfig{"host": "imap2.example.com"},
+		CursorState:         service.MailboxCursorState{"cursor": "2"},
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 180,
+		HealthState:         service.MailboxCapabilityStateHealthy,
+	})
+	require.NoError(t, err)
+	capabilities, err := repo.ListCapabilities(ctx, service.MailboxListOptions{Offset: 1, Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, capabilities, 1)
+	require.Equal(t, otherCapability.ID, capabilities[0].ID)
 
 	queuedJobs, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
 		CapabilityID:  capability.ID,
@@ -311,14 +333,16 @@ func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T
 	require.Empty(t, activeJobs)
 
 	require.NoError(t, repo.DeleteCapability(ctx, capability.ID))
-	capabilities, err = repo.ListCapabilities(ctx, false, 10)
+	capabilities, err = repo.ListCapabilities(ctx, service.MailboxListOptions{Offset: 0, Limit: 10})
 	require.NoError(t, err)
-	require.Empty(t, capabilities)
+	require.Len(t, capabilities, 1)
+	require.Equal(t, otherCapability.ID, capabilities[0].ID)
 
 	require.NoError(t, repo.DeleteCollector(ctx, collector.ID))
-	collectors, err = repo.ListCollectors(ctx, false, 10)
+	collectors, err = repo.ListCollectors(ctx, service.MailboxListOptions{Offset: 0, Limit: 10})
 	require.NoError(t, err)
-	require.Empty(t, collectors)
+	require.Len(t, collectors, 1)
+	require.Equal(t, secondCollector.ID, collectors[0].ID)
 }
 
 func TestMailboxRepository_RecipientIdentityCRUDAndReplaceMatchValues(t *testing.T) {
@@ -372,18 +396,27 @@ func TestMailboxRepository_RecipientIdentityCRUDAndReplaceMatchValues(t *testing
 	require.Len(t, matchValues, 1)
 	require.Equal(t, service.RecipientMatchTypeDomainSuffix, matchValues[0].MatchType)
 
-	identities, err := repo.ListRecipientIdentities(ctx, false, 10)
+	secondIdentity, err := repo.CreateRecipientIdentity(ctx, &service.RecipientIdentity{
+		Name:           "Fallback Inbox",
+		NormalizedName: "fallback inbox",
+		Enabled:        true,
+	}, nil)
+	require.NoError(t, err)
+
+	identities, err := repo.ListRecipientIdentities(ctx, service.MailboxListOptions{Offset: 1, Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, identities, 1)
+	require.Equal(t, secondIdentity.ID, identities[0].ID)
 
 	require.NoError(t, repo.DeleteRecipientIdentity(ctx, identity.ID))
-	identities, err = repo.ListRecipientIdentities(ctx, false, 10)
-	require.NoError(t, err)
-	require.Empty(t, identities)
-
-	identities, err = repo.ListRecipientIdentities(ctx, true, 10)
+	identities, err = repo.ListRecipientIdentities(ctx, service.MailboxListOptions{Offset: 0, Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, identities, 1)
+	require.Equal(t, secondIdentity.ID, identities[0].ID)
+
+	identities, err = repo.ListRecipientIdentities(ctx, service.MailboxListOptions{IncludeDeleted: true, Offset: 0, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, identities, 2)
 	require.NotNil(t, identities[0].DeletedAt)
 }
 
