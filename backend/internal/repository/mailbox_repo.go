@@ -959,31 +959,34 @@ func (r *mailboxRepository) GetHeaderByID(ctx context.Context, id int64) (*servi
 
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
-			id,
-			collector_id,
-			capability_id,
-			remote_message_id,
-			folder,
-			sender,
-			recipients,
-			subject,
-			received_at,
-			flags,
-			snippet,
-			envelope_recipients,
-			delivered_to,
-			original_to,
-			resolved_recipient_identity_id,
-			resolved_address,
-			match_type,
-			matched_value_id,
-			resolution_source_field,
-			resolution_state,
-			detail_fetch_state,
-			created_at,
-			updated_at
-		FROM mailbox_header_cache
-		WHERE id = $1
+			h.id,
+			h.collector_id,
+			h.capability_id,
+			h.remote_message_id,
+			h.folder,
+			h.sender,
+			h.recipients,
+			h.subject,
+			h.received_at,
+			h.flags,
+			h.snippet,
+			h.envelope_recipients,
+			h.delivered_to,
+			h.original_to,
+			h.resolved_recipient_identity_id,
+			h.resolved_address,
+			h.match_type,
+			h.matched_value_id,
+			h.resolution_source_field,
+			h.resolution_state,
+			h.detail_fetch_state,
+			h.created_at,
+			h.updated_at
+		FROM mailbox_header_cache h
+		JOIN mailbox_capabilities c ON c.id = h.capability_id AND c.collector_id = h.collector_id AND c.deleted_at IS NULL
+		JOIN mailbox_collectors mc ON mc.id = h.collector_id AND mc.deleted_at IS NULL
+		JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL
+		WHERE h.id = $1
 	`, id)
 
 	return scanMailHeader(row)
@@ -997,7 +1000,7 @@ func (r *mailboxRepository) ListHeaders(ctx context.Context, filter service.Mail
 	whereClause, args := buildMailboxHeaderFilter(filter)
 
 	var total int64
-	countQuery := "SELECT COUNT(*) FROM mailbox_header_cache h WHERE " + whereClause
+	countQuery := "SELECT COUNT(*) FROM mailbox_header_cache h JOIN mailbox_capabilities c ON c.id = h.capability_id AND c.collector_id = h.collector_id AND c.deleted_at IS NULL JOIN mailbox_collectors mc ON mc.id = h.collector_id AND mc.deleted_at IS NULL JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL WHERE " + whereClause
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -1010,30 +1013,33 @@ func (r *mailboxRepository) ListHeaders(ctx context.Context, filter service.Mail
 	selectArgs := append(append([]any(nil), args...), limit, offset)
 	query := `
 		SELECT
-			id,
-			collector_id,
-			capability_id,
-			remote_message_id,
-			folder,
-			sender,
-			recipients,
-			subject,
-			received_at,
-			flags,
-			snippet,
-			envelope_recipients,
-			delivered_to,
-			original_to,
-			resolved_recipient_identity_id,
-			resolved_address,
-			match_type,
-			matched_value_id,
-			resolution_source_field,
-			resolution_state,
-			detail_fetch_state,
-			created_at,
-			updated_at
+			h.id,
+			h.collector_id,
+			h.capability_id,
+			h.remote_message_id,
+			h.folder,
+			h.sender,
+			h.recipients,
+			h.subject,
+			h.received_at,
+			h.flags,
+			h.snippet,
+			h.envelope_recipients,
+			h.delivered_to,
+			h.original_to,
+			h.resolved_recipient_identity_id,
+			h.resolved_address,
+			h.match_type,
+			h.matched_value_id,
+			h.resolution_source_field,
+			h.resolution_state,
+			h.detail_fetch_state,
+			h.created_at,
+			h.updated_at
 		FROM mailbox_header_cache h
+		JOIN mailbox_capabilities c ON c.id = h.capability_id AND c.collector_id = h.collector_id AND c.deleted_at IS NULL
+		JOIN mailbox_collectors mc ON mc.id = h.collector_id AND mc.deleted_at IS NULL
+		JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL
 		WHERE ` + whereClause + `
 		ORDER BY h.received_at DESC, h.id DESC
 		LIMIT $` + fmt.Sprintf("%d", len(selectArgs)-1) + ` OFFSET $` + fmt.Sprintf("%d", len(selectArgs))

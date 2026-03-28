@@ -188,6 +188,76 @@ func TestMailboxRepository_ListHeadersFiltersByCollectorAndFolder(t *testing.T) 
 	require.Equal(t, []string{"seen"}, headers[0].Flags)
 }
 
+func TestMailboxRepository_HeaderReadsHideDeletedRelations(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	activeCapability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-header-active"})
+	activeHeaderID := mustInsertMailboxHeader(t, ctx, activeCapability.CollectorID, activeCapability.ID, mailboxHeaderSeed{
+		RemoteMessageID: "active-header",
+		Folder:          "INBOX",
+		Subject:         "active",
+		ReceivedAt:      now,
+	})
+
+	providerAccount := mustCreateMailboxProviderAccount(t, ctx, repo)
+	providerCollector := mustCreateMailboxCollector(t, ctx, repo)
+	providerCapability, err := repo.CreateCapability(ctx, &service.MailboxCapability{
+		ProviderAccountID:   providerAccount.ID,
+		CollectorID:         providerCollector.ID,
+		CapabilityKind:      "imap-header-provider-deleted",
+		ConnectionConfig:    service.MailboxConnectionConfig{"host": "imap.example.com"},
+		CursorState:         service.MailboxCursorState{},
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 60,
+		HealthState:         service.MailboxCapabilityStateHealthy,
+	})
+	require.NoError(t, err)
+	providerHeaderID := mustInsertMailboxHeader(t, ctx, providerCollector.ID, providerCapability.ID, mailboxHeaderSeed{
+		RemoteMessageID: "provider-header",
+		Folder:          "INBOX",
+		Subject:         "provider deleted",
+		ReceivedAt:      now.Add(-1 * time.Minute),
+	})
+	require.NoError(t, repo.DeleteProviderAccount(ctx, providerAccount.ID))
+
+	collectorCapability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-header-collector-deleted"})
+	collectorHeaderID := mustInsertMailboxHeader(t, ctx, collectorCapability.CollectorID, collectorCapability.ID, mailboxHeaderSeed{
+		RemoteMessageID: "collector-header",
+		Folder:          "INBOX",
+		Subject:         "collector deleted",
+		ReceivedAt:      now.Add(-2 * time.Minute),
+	})
+	require.NoError(t, repo.DeleteCollector(ctx, collectorCapability.CollectorID))
+
+	capabilityDeleted := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-header-capability-deleted"})
+	capabilityHeaderID := mustInsertMailboxHeader(t, ctx, capabilityDeleted.CollectorID, capabilityDeleted.ID, mailboxHeaderSeed{
+		RemoteMessageID: "capability-header",
+		Folder:          "INBOX",
+		Subject:         "capability deleted",
+		ReceivedAt:      now.Add(-3 * time.Minute),
+	})
+	require.NoError(t, repo.DeleteCapability(ctx, capabilityDeleted.ID))
+
+	headers, total, err := repo.ListHeaders(ctx, service.MailHeaderListFilter{Limit: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, headers, 1)
+	require.Equal(t, activeHeaderID, headers[0].ID)
+
+	activeHeader, err := repo.GetHeaderByID(ctx, activeHeaderID)
+	require.NoError(t, err)
+	require.Equal(t, activeHeaderID, activeHeader.ID)
+
+	_, err = repo.GetHeaderByID(ctx, providerHeaderID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = repo.GetHeaderByID(ctx, collectorHeaderID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = repo.GetHeaderByID(ctx, capabilityHeaderID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+}
+
 func TestMailboxRepository_ProviderAccountCRUDAndList(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)
