@@ -6,31 +6,36 @@ import (
 )
 
 const (
-	ProviderAccountStatusActive  = "active"
-	ProviderAccountStatusInvalid = "invalid"
-	ProviderAccountStatusError   = "error"
+	ProviderAccountStatusDraft    = "draft"
+	ProviderAccountStatusActive   = "active"
+	ProviderAccountStatusInvalid  = "invalid"
+	ProviderAccountStatusDisabled = "disabled"
 
 	CollectorMailboxStatusActive = "active"
 	CollectorMailboxStatusPaused = "paused"
 
-	MailboxCapabilityStatePending = "pending"
-	MailboxCapabilityStateReady   = "ready"
+	MailboxCapabilityStateHealthy = "healthy"
+	MailboxCapabilityStateWarning = "warning"
 	MailboxCapabilityStateError   = "error"
+	MailboxCapabilityStatePaused  = "paused"
+	MailboxCapabilityStateSyncing = "syncing"
 
 	RecipientMatchTypeExactAddress = "exact_address"
 
-	MailResolutionStatePending  = "pending"
-	MailResolutionStateResolved = "resolved"
-	MailResolutionStateUnknown  = "unknown"
+	MailResolutionStateResolved   = "resolved"
+	MailResolutionStateUnresolved = "unresolved"
+	MailResolutionStateAmbiguous  = "ambiguous"
 
-	MailDetailFetchStatePending = "pending"
-	MailDetailFetchStateFetched = "fetched"
-	MailDetailFetchStateError   = "error"
+	MailDetailFetchStateNotRequested = "not_requested"
+	MailDetailFetchStateSucceeded    = "succeeded"
+	MailDetailFetchStateFailed       = "failed"
 
 	MailSyncJobStateQueued    = "queued"
 	MailSyncJobStateRunning   = "running"
 	MailSyncJobStateSucceeded = "succeeded"
+	MailSyncJobStatePartial   = "partial"
 	MailSyncJobStateFailed    = "failed"
+	MailSyncJobStateCancelled = "cancelled"
 
 	MailSyncTriggerSourceScheduled = "scheduled"
 	MailSyncTriggerSourceManual    = "manual"
@@ -48,7 +53,7 @@ type ProviderAccount struct {
 	Status              string     `json:"status"`
 	EncryptedPayload    string     `json:"encrypted_payload"`
 	MailboxHint         *string    `json:"mailbox_hint"`
-	ProviderIdentifier  string     `json:"provider_identifier"`
+	ProviderIdentifier  *string    `json:"provider_identifier"`
 	PayloadVersion      int        `json:"payload_version"`
 	LastImportedAt      *time.Time `json:"last_imported_at"`
 	LastValidationAt    *time.Time `json:"last_validation_at"`
@@ -167,8 +172,8 @@ type MailboxRepository interface {
 	CreateProviderAccount(ctx context.Context, account *ProviderAccount) (*ProviderAccount, error)
 	CreateCollector(ctx context.Context, collector *CollectorMailbox) (*CollectorMailbox, error)
 	CreateCapability(ctx context.Context, capability *MailboxCapability) (*MailboxCapability, error)
-	CreateRecipientIdentity(ctx context.Context, identity *RecipientIdentity) (*RecipientIdentity, error)
-	ListHeaders(ctx context.Context, filter *MailHeaderListFilter) ([]*MailHeader, error)
+	CreateRecipientIdentity(ctx context.Context, in *RecipientIdentity, values []*RecipientMatchValue) (*RecipientIdentity, error)
+	ListHeaders(ctx context.Context, filter MailHeaderListFilter) ([]*MailHeader, int64, error)
 	CreateSyncJobs(ctx context.Context, jobs []*MailSyncJob) ([]*MailSyncJob, error)
 	ClaimDueCapabilities(ctx context.Context, now time.Time, limit int) ([]*MailboxCapability, error)
 }

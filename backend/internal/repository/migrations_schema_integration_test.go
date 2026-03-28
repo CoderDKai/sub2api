@@ -99,10 +99,11 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "status")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "encrypted_payload")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "mailbox_hint")
-	requireColumnExists(t, tx, "mailbox_provider_accounts", "provider_identifier")
+	requireColumn(t, tx, "mailbox_provider_accounts", "provider_identifier", "character varying", 255, true)
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_imported_at")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_validation_at")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_validation_error")
+	requireColumnDefaultContains(t, tx, "mailbox_provider_accounts", "status", "draft")
 	requireIndex(t, tx, "mailbox_provider_accounts", "uq_mailbox_provider_accounts_provider_external_active")
 	requireIndexDefinitionContains(t, tx, "uq_mailbox_provider_accounts_provider_external_active", "provider_kind", "provider_identifier", "deleted_at")
 
@@ -112,6 +113,7 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 
 	requireTableExists(t, tx, "mailbox_capabilities")
 	requireColumnExists(t, tx, "mailbox_capabilities", "provider_account_id")
+	requireColumnDefaultContains(t, tx, "mailbox_capabilities", "state", "healthy")
 	requireIndex(t, tx, "mailbox_capabilities", "idx_mailbox_capabilities_sync_due")
 
 	requireTableExists(t, tx, "mailbox_recipient_identities")
@@ -145,6 +147,8 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	requireColumnExists(t, tx, "mailbox_header_cache", "resolution_source_field")
 	requireColumnExists(t, tx, "mailbox_header_cache", "resolution_state")
 	requireColumnExists(t, tx, "mailbox_header_cache", "detail_fetch_state")
+	requireColumnDefaultContains(t, tx, "mailbox_header_cache", "resolution_state", "unresolved")
+	requireColumnDefaultContains(t, tx, "mailbox_header_cache", "detail_fetch_state", "not_requested")
 	requireIndex(t, tx, "mailbox_header_cache", "uq_mailbox_header_capability_folder_remote")
 
 	requireTableExists(t, tx, "mailbox_sync_jobs")
@@ -155,6 +159,7 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	requireColumnExists(t, tx, "mailbox_sync_jobs", "retry_count")
 	requireColumnExists(t, tx, "mailbox_sync_jobs", "next_retry_at")
 	requireColumnExists(t, tx, "mailbox_sync_jobs", "error_summary")
+	requireColumnDefaultContains(t, tx, "mailbox_sync_jobs", "state", "queued")
 }
 
 func requireTableExists(t *testing.T, tx *sql.Tx, table string) {
@@ -249,6 +254,22 @@ SELECT EXISTS (
 `, table, column).Scan(&exists)
 	require.NoError(t, err, "query information_schema.columns for %s.%s", table, column)
 	require.True(t, exists, "expected column %s on %s", column, table)
+}
+
+func requireColumnDefaultContains(t *testing.T, tx *sql.Tx, table, column, fragment string) {
+	t.Helper()
+
+	var defaultValue sql.NullString
+	err := tx.QueryRowContext(context.Background(), `
+SELECT column_default
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = $1
+  AND column_name = $2
+`, table, column).Scan(&defaultValue)
+	require.NoError(t, err, "query information_schema.columns default for %s.%s", table, column)
+	require.True(t, defaultValue.Valid, "expected default for %s.%s", table, column)
+	require.Contains(t, defaultValue.String, fragment, "expected default for %s.%s to contain %q", table, column, fragment)
 }
 
 func requireColumnNotExists(t *testing.T, tx *sql.Tx, table, column string) {
