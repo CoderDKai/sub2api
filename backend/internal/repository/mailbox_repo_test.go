@@ -563,6 +563,65 @@ func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T
 	require.Equal(t, secondCollector.ID, collectors[0].ID)
 }
 
+func TestMailboxRepository_SyncJobsRejectDeletedCapabilityAndHideDeletedParentJobs(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	deletedCapability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-deleted-cap"})
+	require.NoError(t, repo.DeleteCapability(ctx, deletedCapability.ID))
+	_, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
+		CapabilityID:  deletedCapability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceManual,
+		ScheduledFor:  now,
+	}})
+	require.Error(t, err)
+
+	providerAccount := mustCreateMailboxProviderAccount(t, ctx, repo)
+	collector := mustCreateMailboxCollector(t, ctx, repo)
+	parentDeletedCapability, err := repo.CreateCapability(ctx, &service.MailboxCapability{
+		ProviderAccountID:   providerAccount.ID,
+		CollectorID:         collector.ID,
+		CapabilityKind:      "imap-parent-delete",
+		ConnectionConfig:    service.MailboxConnectionConfig{"host": "imap.example.com"},
+		CursorState:         service.MailboxCursorState{},
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 120,
+		HealthState:         service.MailboxCapabilityStateHealthy,
+	})
+	require.NoError(t, err)
+
+	activeCapability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-active-sync-job"})
+	_, err = repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
+		CapabilityID:  parentDeletedCapability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceManual,
+		ScheduledFor:  now,
+	}, {
+		CapabilityID:  activeCapability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceManual,
+		ScheduledFor:  now.Add(1 * time.Second),
+	}})
+	require.NoError(t, err)
+
+	require.NoError(t, repo.DeleteProviderAccount(ctx, providerAccount.ID))
+
+	activeJobs, err := repo.ListActiveSyncJobs(ctx, nil, 10)
+	require.NoError(t, err)
+	require.Len(t, activeJobs, 1)
+	require.Equal(t, activeCapability.ID, activeJobs[0].CapabilityID)
+
+	_, err = repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
+		CapabilityID:  parentDeletedCapability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceManual,
+		ScheduledFor:  now.Add(2 * time.Second),
+	}})
+	require.Error(t, err)
+}
+
 func TestMailboxRepository_RecipientIdentityCRUDAndReplaceMatchValues(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)

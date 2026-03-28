@@ -26,6 +26,10 @@ type sqlScanRow interface {
 	Scan(dest ...any) error
 }
 
+type sqlQueryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 func NewMailboxRepository(db *sql.DB) service.MailboxRepository {
 	return &mailboxRepository{db: db}
 }
@@ -1074,6 +1078,9 @@ func (r *mailboxRepository) CreateSyncJobs(ctx context.Context, jobs []*service.
 		if job == nil {
 			continue
 		}
+		if err := ensureSyncJobCapabilityActive(ctx, tx, job.CapabilityID); err != nil {
+			return nil, err
+		}
 		state := job.State
 		if state == "" {
 			state = service.MailSyncJobStateQueued
@@ -1186,29 +1193,32 @@ func (r *mailboxRepository) ListActiveSyncJobs(ctx context.Context, capabilityID
 
 	query := `
 		SELECT
-			id,
-			capability_id,
-			batch_id,
-			state,
-			trigger_source,
-			scheduled_for,
-			started_at,
-			finished_at,
-			retryable,
-			retry_count,
-			next_retry_at,
-			error_summary,
-			created_at,
-			updated_at
-		FROM mailbox_sync_jobs
-		WHERE state IN ($1, $2)`
+			j.id,
+			j.capability_id,
+			j.batch_id,
+			j.state,
+			j.trigger_source,
+			j.scheduled_for,
+			j.started_at,
+			j.finished_at,
+			j.retryable,
+			j.retry_count,
+			j.next_retry_at,
+			j.error_summary,
+			j.created_at,
+			j.updated_at
+		FROM mailbox_sync_jobs j
+		JOIN mailbox_capabilities c ON c.id = j.capability_id AND c.deleted_at IS NULL
+		JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL
+		JOIN mailbox_collectors mc ON mc.id = c.collector_id AND mc.deleted_at IS NULL
+		WHERE j.state IN ($1, $2)`
 	args := []any{service.MailSyncJobStateQueued, service.MailSyncJobStateRunning}
 	if capabilityID != nil {
 		args = append(args, *capabilityID)
-		query += fmt.Sprintf(" AND capability_id = $%d", len(args))
+		query += fmt.Sprintf(" AND j.capability_id = $%d", len(args))
 	}
 	args = append(args, normalizeMailboxListLimit(limit))
-	query += fmt.Sprintf(" ORDER BY scheduled_for ASC, id ASC LIMIT $%d", len(args))
+	query += fmt.Sprintf(" ORDER BY j.scheduled_for ASC, j.id ASC LIMIT $%d", len(args))
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1783,6 +1793,29 @@ func (r *mailboxRepository) ensureRecipientIdentityActive(ctx context.Context, r
 	}
 	if !active {
 		return errors.New("recipient identity is deleted or missing")
+	}
+	return nil
+}
+
+func ensureSyncJobCapabilityActive(ctx context.Context, rower sqlQueryRower, capabilityID int64) error {
+	var active bool
+	err := rower.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM mailbox_capabilities c
+			JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id
+			JOIN mailbox_collectors mc ON mc.id = c.collector_id
+			WHERE c.id = $1
+				AND c.deleted_at IS NULL
+				AND pa.deleted_at IS NULL
+				AND mc.deleted_at IS NULL
+		)
+	`, capabilityID).Scan(&active)
+	if err != nil {
+		return err
+	}
+	if !active {
+		return errors.New("capability is deleted or has deleted parents")
 	}
 	return nil
 }
