@@ -20,7 +20,7 @@ func (s *stubUpdateGitHubReleaseClient) DownloadFile(context.Context, string, st
 	return nil
 }
 
-func (s *stubUpdateGitHubReleaseClient) FetchChecksumFile(context.Context, url string) ([]byte, error) {
+func (s *stubUpdateGitHubReleaseClient) FetchChecksumFile(_ context.Context, url string) ([]byte, error) {
 	return nil, nil
 }
 
