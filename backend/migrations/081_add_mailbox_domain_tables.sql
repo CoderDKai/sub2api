@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS mailbox_collectors (
     email_address VARCHAR(320) NOT NULL,
     display_name VARCHAR(255) NOT NULL DEFAULT '',
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    business_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -44,11 +45,13 @@ CREATE TABLE IF NOT EXISTS mailbox_capabilities (
     provider_account_id BIGINT NOT NULL REFERENCES mailbox_provider_accounts(id) ON DELETE CASCADE,
     collector_id BIGINT NOT NULL REFERENCES mailbox_collectors(id) ON DELETE CASCADE,
     capability_kind VARCHAR(32) NOT NULL,
-    folder VARCHAR(128) NOT NULL DEFAULT 'INBOX',
-    state VARCHAR(32) NOT NULL DEFAULT 'healthy',
-    import_cursor TEXT,
-    last_synced_at TIMESTAMPTZ,
-    sync_due_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    connection_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    cursor_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sync_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    sync_interval_seconds INT NOT NULL DEFAULT 300,
+    next_sync_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_sync_at TIMESTAMPTZ,
+    health_state VARCHAR(32) NOT NULL DEFAULT 'healthy',
     last_error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -56,11 +59,11 @@ CREATE TABLE IF NOT EXISTS mailbox_capabilities (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_mailbox_capabilities_provider_collector_kind_folder_active
-    ON mailbox_capabilities (provider_account_id, collector_id, capability_kind, folder)
+    ON mailbox_capabilities (provider_account_id, collector_id, capability_kind)
     WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_mailbox_capabilities_sync_due
-    ON mailbox_capabilities (sync_due_at)
+    ON mailbox_capabilities (next_sync_at)
     WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS mailbox_recipient_identities (
@@ -81,6 +84,8 @@ CREATE TABLE IF NOT EXISTS mailbox_recipient_match_values (
     normalized_value TEXT NOT NULL,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     priority INT NOT NULL DEFAULT 0,
+    source_kind VARCHAR(32) NOT NULL DEFAULT 'manual',
+    source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     disabled_at TIMESTAMPTZ

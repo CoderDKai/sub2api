@@ -65,6 +65,7 @@ type CollectorMailbox struct {
 	EmailAddress string     `json:"email_address"`
 	DisplayName  string     `json:"display_name"`
 	Enabled      bool       `json:"enabled"`
+	BusinessTags []string   `json:"business_tags"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DeletedAt    *time.Time `json:"deleted_at"`
@@ -75,11 +76,13 @@ type MailboxCapability struct {
 	ProviderAccountID int64      `json:"provider_account_id"`
 	CollectorID       int64      `json:"collector_id"`
 	CapabilityKind    string     `json:"capability_kind"`
-	Folder            string     `json:"folder"`
-	State             string     `json:"state"`
-	ImportCursor      *string    `json:"import_cursor"`
-	LastSyncedAt      *time.Time `json:"last_synced_at"`
-	SyncDueAt         time.Time  `json:"sync_due_at"`
+	ConnectionConfig  map[string]any `json:"connection_config"`
+	CursorState       map[string]any `json:"cursor_state"`
+	SyncEnabled       bool       `json:"sync_enabled"`
+	SyncIntervalSeconds int      `json:"sync_interval_seconds"`
+	NextSyncAt        time.Time  `json:"next_sync_at"`
+	LastSyncAt        *time.Time `json:"last_sync_at"`
+	HealthState       string     `json:"health_state"`
 	LastError         *string    `json:"last_error"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
@@ -104,6 +107,8 @@ type RecipientMatchValue struct {
 	NormalizedValue     string     `json:"normalized_value"`
 	Active              bool       `json:"active"`
 	Priority            int        `json:"priority"`
+	SourceKind          string     `json:"source_kind"`
+	SourceMetadata      map[string]any `json:"source_metadata"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`
 	DisabledAt          *time.Time `json:"disabled_at"`
