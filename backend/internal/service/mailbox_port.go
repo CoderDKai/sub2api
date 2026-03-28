@@ -56,6 +56,7 @@ type RecipientIdentity struct {
 
 type RecipientMatchValue struct {
 	ID                  int64      `json:"id"`
+	CollectorID          int64      `json:"collector_id"`
 	RecipientIdentityID int64      `json:"recipient_identity_id"`
 	MatchType           string     `json:"match_type"`
 	MatchValue          string     `json:"match_value"`

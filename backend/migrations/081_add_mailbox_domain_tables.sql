@@ -72,9 +72,13 @@ CREATE INDEX IF NOT EXISTS idx_mailbox_recipient_identities_collector_id
     ON mailbox_recipient_identities (collector_id)
     WHERE deleted_at IS NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mailbox_recipient_identities_id_collector
+    ON mailbox_recipient_identities (id, collector_id);
+
 CREATE TABLE IF NOT EXISTS mailbox_recipient_match_values (
     id BIGSERIAL PRIMARY KEY,
-    recipient_identity_id BIGINT NOT NULL REFERENCES mailbox_recipient_identities(id) ON DELETE CASCADE,
+    collector_id BIGINT NOT NULL REFERENCES mailbox_collectors(id) ON DELETE CASCADE,
+    recipient_identity_id BIGINT NOT NULL,
     match_type VARCHAR(32) NOT NULL,
     match_value TEXT NOT NULL,
     normalized_value TEXT NOT NULL,
@@ -82,14 +86,22 @@ CREATE TABLE IF NOT EXISTS mailbox_recipient_match_values (
     priority INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    disabled_at TIMESTAMPTZ
+    disabled_at TIMESTAMPTZ,
+
+    CONSTRAINT fk_mailbox_recipient_match_values_identity_collector
+        FOREIGN KEY (recipient_identity_id, collector_id)
+        REFERENCES mailbox_recipient_identities(id, collector_id)
+        ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_mailbox_recipient_match_values_identity_id
     ON mailbox_recipient_match_values (recipient_identity_id);
 
+CREATE INDEX IF NOT EXISTS idx_mailbox_recipient_match_values_collector_id
+    ON mailbox_recipient_match_values (collector_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_mailbox_recipient_exact_active
-    ON mailbox_recipient_match_values (recipient_identity_id, normalized_value)
+    ON mailbox_recipient_match_values (collector_id, normalized_value)
     WHERE match_type = 'exact' AND active = TRUE;
 
 CREATE TABLE IF NOT EXISTS mailbox_header_cache (

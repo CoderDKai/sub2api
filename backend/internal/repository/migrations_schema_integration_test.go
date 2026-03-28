@@ -109,9 +109,10 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	requireColumnExists(t, tx, "mailbox_recipient_identities", "name")
 
 	requireTableExists(t, tx, "mailbox_recipient_match_values")
+	requireColumnExists(t, tx, "mailbox_recipient_match_values", "collector_id")
 	requireColumnExists(t, tx, "mailbox_recipient_match_values", "recipient_identity_id")
 	requireIndex(t, tx, "mailbox_recipient_match_values", "uq_mailbox_recipient_exact_active")
-	requireIndexDefinitionContains(t, tx, "uq_mailbox_recipient_exact_active", "recipient_identity_id", "normalized_value", "match_type", "active")
+	requireIndexDefinitionContains(t, tx, "uq_mailbox_recipient_exact_active", "collector_id", "normalized_value", "match_type", "active")
 
 	requireTableExists(t, tx, "mailbox_header_cache")
 	requireColumnExists(t, tx, "mailbox_header_cache", "received_at")
