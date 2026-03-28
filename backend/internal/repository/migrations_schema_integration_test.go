@@ -93,44 +93,68 @@ func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
 	tx := testTx(t)
 
 	requireTableExists(t, tx, "mailbox_provider_accounts")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "display_name")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "provider_kind")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "auth_kind")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "status")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "encrypted_payload")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "mailbox_hint")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "provider_identifier")
 	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_imported_at")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_validation_at")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_validation_error")
 	requireIndex(t, tx, "mailbox_provider_accounts", "uq_mailbox_provider_accounts_provider_external_active")
-	requireIndexDefinitionContains(t, tx, "uq_mailbox_provider_accounts_provider_external_active", "provider_kind", "external_account_id", "deleted_at")
+	requireIndexDefinitionContains(t, tx, "uq_mailbox_provider_accounts_provider_external_active", "provider_kind", "provider_identifier", "deleted_at")
 
 	requireTableExists(t, tx, "mailbox_collectors")
 	requireColumnExists(t, tx, "mailbox_collectors", "email_address")
+	requireColumnNotExists(t, tx, "mailbox_collectors", "provider_account_id")
 
 	requireTableExists(t, tx, "mailbox_capabilities")
+	requireColumnExists(t, tx, "mailbox_capabilities", "provider_account_id")
 	requireIndex(t, tx, "mailbox_capabilities", "idx_mailbox_capabilities_sync_due")
 
 	requireTableExists(t, tx, "mailbox_recipient_identities")
 	requireColumnExists(t, tx, "mailbox_recipient_identities", "name")
+	requireColumnNotExists(t, tx, "mailbox_recipient_identities", "collector_id")
 
 	requireTableExists(t, tx, "mailbox_recipient_match_values")
-	requireColumnExists(t, tx, "mailbox_recipient_match_values", "collector_id")
 	requireColumnExists(t, tx, "mailbox_recipient_match_values", "recipient_identity_id")
+	requireColumnNotExists(t, tx, "mailbox_recipient_match_values", "collector_id")
 	requireIndex(t, tx, "mailbox_recipient_match_values", "uq_mailbox_recipient_exact_active")
-	requireIndexDefinitionContains(t, tx, "uq_mailbox_recipient_exact_active", "collector_id", "normalized_value", "match_type", "active")
+	requireIndexDefinitionContains(t, tx, "uq_mailbox_recipient_exact_active", "normalized_value", "exact_address", "active")
 
 	requireTableExists(t, tx, "mailbox_header_cache")
+	requireColumnExists(t, tx, "mailbox_header_cache", "collector_id")
+	requireColumnExists(t, tx, "mailbox_header_cache", "capability_id")
+	requireColumnExists(t, tx, "mailbox_header_cache", "remote_message_id")
+	requireColumnExists(t, tx, "mailbox_header_cache", "folder")
+	requireColumnExists(t, tx, "mailbox_header_cache", "sender")
+	requireColumn(t, tx, "mailbox_header_cache", "recipients", "jsonb", 0, false)
+	requireColumnExists(t, tx, "mailbox_header_cache", "subject")
 	requireColumnExists(t, tx, "mailbox_header_cache", "received_at")
+	requireColumn(t, tx, "mailbox_header_cache", "flags", "jsonb", 0, false)
 	requireColumnExists(t, tx, "mailbox_header_cache", "snippet")
 	requireColumnExists(t, tx, "mailbox_header_cache", "resolved_address")
-	requireColumnExists(t, tx, "mailbox_header_cache", "envelope_recipients")
-	requireColumnExists(t, tx, "mailbox_header_cache", "delivered_to")
-	requireColumnExists(t, tx, "mailbox_header_cache", "original_to")
+	requireColumn(t, tx, "mailbox_header_cache", "envelope_recipients", "jsonb", 0, false)
+	requireColumn(t, tx, "mailbox_header_cache", "delivered_to", "jsonb", 0, false)
+	requireColumn(t, tx, "mailbox_header_cache", "original_to", "jsonb", 0, false)
+	requireColumnExists(t, tx, "mailbox_header_cache", "resolved_recipient_identity_id")
 	requireColumnExists(t, tx, "mailbox_header_cache", "match_type")
 	requireColumnExists(t, tx, "mailbox_header_cache", "matched_value_id")
 	requireColumnExists(t, tx, "mailbox_header_cache", "resolution_source_field")
 	requireColumnExists(t, tx, "mailbox_header_cache", "resolution_state")
+	requireColumnExists(t, tx, "mailbox_header_cache", "detail_fetch_state")
 	requireIndex(t, tx, "mailbox_header_cache", "uq_mailbox_header_capability_folder_remote")
 
 	requireTableExists(t, tx, "mailbox_sync_jobs")
-	requireColumnExists(t, tx, "mailbox_sync_jobs", "batch_id")
+	requireColumn(t, tx, "mailbox_sync_jobs", "batch_id", "character varying", 64, true)
+	requireColumnExists(t, tx, "mailbox_sync_jobs", "state")
+	requireColumnExists(t, tx, "mailbox_sync_jobs", "trigger_source")
 	requireColumnExists(t, tx, "mailbox_sync_jobs", "retryable")
+	requireColumnExists(t, tx, "mailbox_sync_jobs", "retry_count")
 	requireColumnExists(t, tx, "mailbox_sync_jobs", "next_retry_at")
+	requireColumnExists(t, tx, "mailbox_sync_jobs", "error_summary")
 }
 
 func requireTableExists(t *testing.T, tx *sql.Tx, table string) {
@@ -225,4 +249,21 @@ SELECT EXISTS (
 `, table, column).Scan(&exists)
 	require.NoError(t, err, "query information_schema.columns for %s.%s", table, column)
 	require.True(t, exists, "expected column %s on %s", column, table)
+}
+
+func requireColumnNotExists(t *testing.T, tx *sql.Tx, table, column string) {
+	t.Helper()
+
+	var exists bool
+	err := tx.QueryRowContext(context.Background(), `
+SELECT EXISTS (
+	SELECT 1
+	FROM information_schema.columns
+	WHERE table_schema = 'public'
+	  AND table_name = $1
+	  AND column_name = $2
+)
+`, table, column).Scan(&exists)
+	require.NoError(t, err, "query information_schema.columns for %s.%s", table, column)
+	require.False(t, exists, "expected column %s on %s to be absent", column, table)
 }
