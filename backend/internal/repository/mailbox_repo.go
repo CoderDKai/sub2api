@@ -155,7 +155,7 @@ func (r *mailboxRepository) UpdateProviderAccount(ctx context.Context, account *
 			last_validation_at = $11,
 			last_validation_error = $12,
 			updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING
 			id,
 			display_name,
@@ -343,7 +343,7 @@ func (r *mailboxRepository) UpdateCollector(ctx context.Context, collector *serv
 			enabled = $4,
 			business_tags = $5::jsonb,
 			updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING
 			id,
 			email_address,
@@ -573,7 +573,7 @@ func (r *mailboxRepository) UpdateCapability(ctx context.Context, capability *se
 			health_state = $11,
 			last_error = $12,
 			updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING
 			id,
 			provider_account_id,
@@ -754,7 +754,7 @@ func (r *mailboxRepository) UpdateRecipientIdentity(ctx context.Context, in *ser
 			normalized_name = $3,
 			enabled = $4,
 			updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, normalized_name, enabled, created_at, updated_at, deleted_at
 	`, in.ID, in.Name, in.NormalizedName, in.Enabled)
 

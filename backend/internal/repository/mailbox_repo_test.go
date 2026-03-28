@@ -458,6 +458,46 @@ func TestMailboxRepository_CreateOrUpdateCapabilityRejectsDeletedParents(t *test
 	require.Error(t, err)
 }
 
+func TestMailboxRepository_UpdateDeletedRecordsFails(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	nextSyncAt := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Microsecond)
+
+	provider := mustCreateMailboxProviderAccount(t, ctx, repo)
+	require.NoError(t, repo.DeleteProviderAccount(ctx, provider.ID))
+	provider.DisplayName = "should-fail"
+	_, err := repo.UpdateProviderAccount(ctx, provider)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	collector := mustCreateMailboxCollector(t, ctx, repo)
+	require.NoError(t, repo.DeleteCollector(ctx, collector.ID))
+	collector.DisplayName = "should-fail"
+	_, err = repo.UpdateCollector(ctx, collector)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	capability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{
+		CapabilityKind:      "imap-update-deleted",
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 300,
+		NextSyncAt:          &nextSyncAt,
+	})
+	require.NoError(t, repo.DeleteCapability(ctx, capability.ID))
+	capability.HealthState = service.MailboxCapabilityStateWarning
+	_, err = repo.UpdateCapability(ctx, capability)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	identity, err := repo.CreateRecipientIdentity(ctx, &service.RecipientIdentity{
+		Name:           "Deleted Update Identity",
+		NormalizedName: "deleted update identity",
+		Enabled:        true,
+	}, nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteRecipientIdentity(ctx, identity.ID))
+	identity.Name = "should-fail"
+	_, err = repo.UpdateRecipientIdentity(ctx, identity)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+}
+
 func TestMailboxRepository_CollectorCapabilityAndSyncJobBaseMethods(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)
