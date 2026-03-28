@@ -228,7 +228,13 @@ func (r *mailboxRepository) DeleteProviderAccount(ctx context.Context, id int64)
 		return errors.New("mailbox repository db is nil")
 	}
 
-	res, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 		UPDATE mailbox_provider_accounts
 		SET deleted_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
@@ -236,7 +242,20 @@ func (r *mailboxRepository) DeleteProviderAccount(ctx context.Context, id int64)
 	if err != nil {
 		return err
 	}
-	return ensureRowsAffected(res)
+	if err := ensureRowsAffected(res); err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE mailbox_capabilities
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE provider_account_id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *mailboxRepository) CreateCollector(ctx context.Context, collector *service.CollectorMailbox) (*service.CollectorMailbox, error) {
@@ -381,7 +400,13 @@ func (r *mailboxRepository) DeleteCollector(ctx context.Context, id int64) error
 		return errors.New("mailbox repository db is nil")
 	}
 
-	res, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 		UPDATE mailbox_collectors
 		SET deleted_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
@@ -389,7 +414,20 @@ func (r *mailboxRepository) DeleteCollector(ctx context.Context, id int64) error
 	if err != nil {
 		return err
 	}
-	return ensureRowsAffected(res)
+	if err := ensureRowsAffected(res); err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE mailbox_capabilities
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE collector_id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *mailboxRepository) CreateCapability(ctx context.Context, capability *service.MailboxCapability) (*service.MailboxCapability, error) {
@@ -554,26 +592,28 @@ func (r *mailboxRepository) ListCapabilities(ctx context.Context, opts service.M
 
 	query := `
 		SELECT
-			id,
-			provider_account_id,
-			collector_id,
-			capability_kind,
-			connection_config,
-			cursor_state,
-			sync_enabled,
-			sync_interval_seconds,
-			next_sync_at,
-			last_sync_at,
-			health_state,
-			last_error,
-			created_at,
-			updated_at,
-			deleted_at
-		FROM mailbox_capabilities`
+			c.id,
+			c.provider_account_id,
+			c.collector_id,
+			c.capability_kind,
+			c.connection_config,
+			c.cursor_state,
+			c.sync_enabled,
+			c.sync_interval_seconds,
+			c.next_sync_at,
+			c.last_sync_at,
+			c.health_state,
+			c.last_error,
+			c.created_at,
+			c.updated_at,
+			c.deleted_at
+		FROM mailbox_capabilities c
+		JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL
+		JOIN mailbox_collectors mc ON mc.id = c.collector_id AND mc.deleted_at IS NULL`
 	if !opts.IncludeDeleted {
-		query += ` WHERE deleted_at IS NULL`
+		query += ` WHERE c.deleted_at IS NULL`
 	}
-	query += ` ORDER BY id ASC LIMIT $1 OFFSET $2`
+	query += ` ORDER BY c.id ASC LIMIT $1 OFFSET $2`
 
 	rows, err := r.db.QueryContext(ctx, query, normalizeMailboxListLimit(opts.Limit), normalizeMailboxListOffset(opts.Offset))
 	if err != nil {
@@ -1234,7 +1274,11 @@ func (r *mailboxRepository) ClaimDueCapabilities(ctx context.Context, now time.T
 		WITH candidates AS (
 			SELECT c.id
 			FROM mailbox_capabilities c
+			JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id
+			JOIN mailbox_collectors mc ON mc.id = c.collector_id
 			WHERE c.deleted_at IS NULL
+				AND pa.deleted_at IS NULL
+				AND mc.deleted_at IS NULL
 				AND c.sync_enabled = TRUE
 				AND c.next_sync_at IS NOT NULL
 				AND c.next_sync_at <= $1
@@ -1257,6 +1301,16 @@ func (r *mailboxRepository) ClaimDueCapabilities(ctx context.Context, now time.T
 				AND c.sync_enabled = TRUE
 				AND c.next_sync_at IS NOT NULL
 				AND c.next_sync_at <= $1
+				AND EXISTS (
+					SELECT 1
+					FROM mailbox_provider_accounts pa
+					WHERE pa.id = c.provider_account_id AND pa.deleted_at IS NULL
+				)
+				AND EXISTS (
+					SELECT 1
+					FROM mailbox_collectors mc
+					WHERE mc.id = c.collector_id AND mc.deleted_at IS NULL
+				)
 			RETURNING
 				c.id,
 				c.provider_account_id,
