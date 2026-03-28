@@ -89,6 +89,55 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
 }
 
+func TestMigrationsRunner_CreatesMailboxDomainTables(t *testing.T) {
+	tx := testTx(t)
+
+	requireTableExists(t, tx, "mailbox_provider_accounts")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "provider_kind")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "encrypted_payload")
+	requireColumnExists(t, tx, "mailbox_provider_accounts", "last_imported_at")
+
+	requireTableExists(t, tx, "mailbox_collectors")
+	requireColumnExists(t, tx, "mailbox_collectors", "email_address")
+
+	requireTableExists(t, tx, "mailbox_capabilities")
+	requireIndex(t, tx, "mailbox_capabilities", "idx_mailbox_capabilities_sync_due")
+
+	requireTableExists(t, tx, "mailbox_recipient_identities")
+	requireColumnExists(t, tx, "mailbox_recipient_identities", "name")
+
+	requireTableExists(t, tx, "mailbox_recipient_match_values")
+	requireColumnExists(t, tx, "mailbox_recipient_match_values", "recipient_identity_id")
+	requireIndex(t, tx, "mailbox_recipient_match_values", "uq_mailbox_recipient_exact_active")
+
+	requireTableExists(t, tx, "mailbox_header_cache")
+	requireColumnExists(t, tx, "mailbox_header_cache", "received_at")
+	requireColumnExists(t, tx, "mailbox_header_cache", "snippet")
+	requireColumnExists(t, tx, "mailbox_header_cache", "resolved_address")
+	requireColumnExists(t, tx, "mailbox_header_cache", "envelope_recipients")
+	requireColumnExists(t, tx, "mailbox_header_cache", "delivered_to")
+	requireColumnExists(t, tx, "mailbox_header_cache", "original_to")
+	requireColumnExists(t, tx, "mailbox_header_cache", "match_type")
+	requireColumnExists(t, tx, "mailbox_header_cache", "matched_value_id")
+	requireColumnExists(t, tx, "mailbox_header_cache", "resolution_source_field")
+	requireColumnExists(t, tx, "mailbox_header_cache", "resolution_state")
+	requireIndex(t, tx, "mailbox_header_cache", "uq_mailbox_header_capability_folder_remote")
+
+	requireTableExists(t, tx, "mailbox_sync_jobs")
+	requireColumnExists(t, tx, "mailbox_sync_jobs", "batch_id")
+	requireColumnExists(t, tx, "mailbox_sync_jobs", "retryable")
+	requireColumnExists(t, tx, "mailbox_sync_jobs", "next_retry_at")
+}
+
+func requireTableExists(t *testing.T, tx *sql.Tx, table string) {
+	t.Helper()
+
+	var regclass sql.NullString
+	err := tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.' || $1)", table).Scan(&regclass)
+	require.NoError(t, err, "query to_regclass for %s", table)
+	require.True(t, regclass.Valid, "expected %s table to exist", table)
+}
+
 func requireIndex(t *testing.T, tx *sql.Tx, table, index string) {
 	t.Helper()
 
@@ -138,4 +187,21 @@ WHERE table_schema = 'public'
 	} else {
 		require.Equal(t, "NO", row.Nullable, "nullable mismatch for %s.%s", table, column)
 	}
+}
+
+func requireColumnExists(t *testing.T, tx *sql.Tx, table, column string) {
+	t.Helper()
+
+	var exists bool
+	err := tx.QueryRowContext(context.Background(), `
+SELECT EXISTS (
+	SELECT 1
+	FROM information_schema.columns
+	WHERE table_schema = 'public'
+	  AND table_name = $1
+	  AND column_name = $2
+)
+`, table, column).Scan(&exists)
+	require.NoError(t, err, "query information_schema.columns for %s.%s", table, column)
+	require.True(t, exists, "expected column %s on %s", column, table)
 }
