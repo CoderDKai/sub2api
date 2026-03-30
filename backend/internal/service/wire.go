@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	mailboxpkg "github.com/Wei-Shaw/sub2api/internal/pkg/mailbox"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	mailboxpkg "github.com/Wei-Shaw/sub2api/internal/pkg/mailbox"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
 )
@@ -497,4 +497,6 @@ var ProviderSet = wire.NewSet(
 	NewMailboxAuditLogger,
 	NewMailboxService,
 	NewMailboxResolutionService,
+	NewMailboxSyncService,
+	NewMailboxSyncRunnerService,
 )
