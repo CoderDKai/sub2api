@@ -100,25 +100,25 @@ func TestMailboxRepository_CreateSyncJobsReturnsIDsAndClaimDueCapabilitiesSkipsA
 		CapabilityKind:      "imap-due",
 		SyncEnabled:         true,
 		SyncIntervalSeconds: 120,
-		NextSyncAt:          ptrTime(now.Add(-2 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(-2 * time.Minute)),
 	})
 	activeCapability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{
 		CapabilityKind:      "imap-active",
 		SyncEnabled:         true,
 		SyncIntervalSeconds: 120,
-		NextSyncAt:          ptrTime(now.Add(-1 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(-1 * time.Minute)),
 	})
 	_ = mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{
 		CapabilityKind:      "imap-future",
 		SyncEnabled:         true,
 		SyncIntervalSeconds: 120,
-		NextSyncAt:          ptrTime(now.Add(15 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(15 * time.Minute)),
 	})
 	_ = mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{
 		CapabilityKind:      "imap-disabled",
 		SyncEnabled:         false,
 		SyncIntervalSeconds: 120,
-		NextSyncAt:          ptrTime(now.Add(-3 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(-3 * time.Minute)),
 	})
 
 	jobs, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
@@ -153,7 +153,7 @@ func TestMailboxRepository_ClaimRunnableRetrySyncJobsClaimsEachRetryJobOnce(t *t
 		CapabilityKind:      "imap-retry",
 		SyncEnabled:         true,
 		SyncIntervalSeconds: 120,
-		NextSyncAt:          ptrTime(now.Add(5 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(5 * time.Minute)),
 	})
 
 	jobs, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
@@ -163,7 +163,7 @@ func TestMailboxRepository_ClaimRunnableRetrySyncJobsClaimsEachRetryJobOnce(t *t
 		ScheduledFor:  now.Add(-1 * time.Minute),
 		Retryable:     true,
 		RetryCount:    1,
-		NextRetryAt:   ptrTime(now.Add(-30 * time.Second)),
+		NextRetryAt:   mailboxTestPtrTime(now.Add(-30 * time.Second)),
 	}, {
 		CapabilityID:  capability.ID,
 		State:         service.MailSyncJobStateQueued,
@@ -171,7 +171,7 @@ func TestMailboxRepository_ClaimRunnableRetrySyncJobsClaimsEachRetryJobOnce(t *t
 		ScheduledFor:  now.Add(-1 * time.Minute),
 		Retryable:     true,
 		RetryCount:    2,
-		NextRetryAt:   ptrTime(now.Add(10 * time.Minute)),
+		NextRetryAt:   mailboxTestPtrTime(now.Add(10 * time.Minute)),
 	}, {
 		CapabilityID:  capability.ID,
 		State:         service.MailSyncJobStateQueued,
@@ -520,7 +520,7 @@ func TestMailboxRepository_DeletedParentHidesCapabilitiesFromListAndClaim(t *tes
 		CursorState:         service.MailboxCursorState{},
 		SyncEnabled:         true,
 		SyncIntervalSeconds: 60,
-		NextSyncAt:          ptrTime(now.Add(-1 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(-1 * time.Minute)),
 		HealthState:         service.MailboxCapabilityStateHealthy,
 	})
 	require.NoError(t, err)
@@ -535,7 +535,7 @@ func TestMailboxRepository_DeletedParentHidesCapabilitiesFromListAndClaim(t *tes
 		CursorState:         service.MailboxCursorState{},
 		SyncEnabled:         true,
 		SyncIntervalSeconds: 60,
-		NextSyncAt:          ptrTime(now.Add(-1 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(-1 * time.Minute)),
 		HealthState:         service.MailboxCapabilityStateHealthy,
 	})
 	require.NoError(t, err)
@@ -562,7 +562,7 @@ func TestMailboxRepository_DeletedParentHidesCapabilitiesFromListAndClaim(t *tes
 		CursorState:         service.MailboxCursorState{},
 		SyncEnabled:         true,
 		SyncIntervalSeconds: 60,
-		NextSyncAt:          ptrTime(now.Add(-2 * time.Minute)),
+		NextSyncAt:          mailboxTestPtrTime(now.Add(-2 * time.Minute)),
 		HealthState:         service.MailboxCapabilityStateHealthy,
 	})
 	require.NoError(t, err)
@@ -1149,7 +1149,7 @@ func mailboxRowCount(t *testing.T, ctx context.Context, table string) int64 {
 	return count
 }
 
-func ptrTime(v time.Time) *time.Time {
+func mailboxTestPtrTime(v time.Time) *time.Time {
 	return &v
 }
 
