@@ -1422,6 +1422,63 @@ func (r *mailboxRepository) ListSyncJobsByBatchID(ctx context.Context, batchID s
 	return jobs, nil
 }
 
+func (r *mailboxRepository) ListRunnableRetrySyncJobs(ctx context.Context, now time.Time, limit int) ([]*service.MailSyncJob, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if limit <= 0 {
+		limit = defaultMailboxClaimLimit
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			j.id,
+			j.capability_id,
+			j.batch_id,
+			j.state,
+			j.trigger_source,
+			j.scheduled_for,
+			j.started_at,
+			j.finished_at,
+			j.retryable,
+			j.retry_count,
+			j.next_retry_at,
+			j.error_summary,
+			j.created_at,
+			j.updated_at
+		FROM mailbox_sync_jobs j
+		JOIN mailbox_capabilities c ON c.id = j.capability_id AND c.deleted_at IS NULL
+		JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL
+		JOIN mailbox_collectors mc ON mc.id = c.collector_id AND mc.deleted_at IS NULL
+		WHERE j.state = $1
+			AND j.trigger_source = $2
+			AND j.next_retry_at IS NOT NULL
+			AND j.next_retry_at <= $3
+		ORDER BY j.next_retry_at ASC, j.id ASC
+		LIMIT $4
+	`, service.MailSyncJobStateQueued, service.MailSyncTriggerSourceRetry, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	jobs := make([]*service.MailSyncJob, 0)
+	for rows.Next() {
+		job, err := scanMailSyncJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
 func (r *mailboxRepository) ListActiveSyncJobs(ctx context.Context, capabilityID *int64, limit int) ([]*service.MailSyncJob, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")

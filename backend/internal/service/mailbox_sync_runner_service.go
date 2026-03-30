@@ -22,12 +22,29 @@ func NewMailboxSyncRunnerService(repo MailboxRepository, syncSvc *MailboxSyncSer
 
 func (s *MailboxSyncRunnerService) RunDue(ctx context.Context, limit int) ([]*MailSyncJob, error) {
 	now := s.now().UTC()
-	capabilities, err := s.repo.ClaimDueCapabilities(ctx, now, limit)
+	jobs := make([]*MailSyncJob, 0)
+	var runErr error
+
+	retryJobs, err := s.repo.ListRunnableRetrySyncJobs(ctx, now, limit)
 	if err != nil {
 		return nil, err
 	}
+	for _, job := range retryJobs {
+		if job == nil {
+			continue
+		}
+		jobs = append(jobs, job)
+		if _, err := s.syncSvc.RunSyncJob(ctx, job.ID); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+	}
+
+	capabilities, err := s.repo.ClaimDueCapabilities(ctx, now, limit)
+	if err != nil {
+		return jobs, errors.Join(runErr, err)
+	}
 	if len(capabilities) == 0 {
-		return []*MailSyncJob{}, nil
+		return jobs, runErr
 	}
 	capabilityIDs := make([]int64, 0, len(capabilities))
 	for _, capability := range capabilities {
@@ -36,19 +53,19 @@ func (s *MailboxSyncRunnerService) RunDue(ctx context.Context, limit int) ([]*Ma
 		}
 		capabilityIDs = append(capabilityIDs, capability.ID)
 	}
-	jobs, err := s.syncSvc.CreateBatchSyncJobs(ctx, MailboxBatchSyncRequest{
+	scheduledJobs, err := s.syncSvc.CreateBatchSyncJobs(ctx, MailboxBatchSyncRequest{
 		CapabilityIDs: capabilityIDs,
 		TriggerSource: MailSyncTriggerSourceSchedule,
 		ScheduledFor:  &now,
 	})
 	if err != nil {
 		if requeueErr := s.requeueCapabilities(ctx, capabilities, now); requeueErr != nil {
-			return nil, errors.Join(err, requeueErr)
+			return jobs, errors.Join(runErr, err, requeueErr)
 		}
-		return nil, err
+		return jobs, errors.Join(runErr, err)
 	}
-	var runErr error
-	for _, job := range jobs {
+	jobs = append(jobs, scheduledJobs...)
+	for _, job := range scheduledJobs {
 		if job == nil {
 			continue
 		}

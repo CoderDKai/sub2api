@@ -507,6 +507,10 @@ func (r *mailboxRepositoryStub) ListSyncJobsByBatchID(ctx context.Context, batch
 	panic("unexpected ListSyncJobsByBatchID call")
 }
 
+func (r *mailboxRepositoryStub) ListRunnableRetrySyncJobs(ctx context.Context, now time.Time, limit int) ([]*MailSyncJob, error) {
+	panic("unexpected ListRunnableRetrySyncJobs call")
+}
+
 func (r *mailboxRepositoryStub) ListActiveSyncJobs(ctx context.Context, capabilityID *int64, limit int) ([]*MailSyncJob, error) {
 	panic("unexpected ListActiveSyncJobs call")
 }

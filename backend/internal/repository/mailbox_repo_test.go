@@ -145,6 +145,49 @@ func TestMailboxRepository_CreateSyncJobsReturnsIDsAndClaimDueCapabilitiesSkipsA
 	require.Empty(t, dueCapabilities)
 }
 
+func TestMailboxRepository_ListRunnableRetrySyncJobsReturnsDueRetryJobs(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	capability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{
+		CapabilityKind:      "imap-retry",
+		SyncEnabled:         true,
+		SyncIntervalSeconds: 120,
+		NextSyncAt:          ptrTime(now.Add(5 * time.Minute)),
+	})
+
+	jobs, err := repo.CreateSyncJobs(ctx, []*service.MailSyncJob{{
+		CapabilityID:  capability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceRetry,
+		ScheduledFor:  now.Add(-1 * time.Minute),
+		Retryable:     true,
+		RetryCount:    1,
+		NextRetryAt:   ptrTime(now.Add(-30 * time.Second)),
+	}, {
+		CapabilityID:  capability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceRetry,
+		ScheduledFor:  now.Add(-1 * time.Minute),
+		Retryable:     true,
+		RetryCount:    2,
+		NextRetryAt:   ptrTime(now.Add(10 * time.Minute)),
+	}, {
+		CapabilityID:  capability.ID,
+		State:         service.MailSyncJobStateQueued,
+		TriggerSource: service.MailSyncTriggerSourceSchedule,
+		ScheduledFor:  now.Add(-1 * time.Minute),
+	}})
+	require.NoError(t, err)
+	require.Len(t, jobs, 3)
+
+	runnable, err := repo.ListRunnableRetrySyncJobs(ctx, now, 10)
+	require.NoError(t, err)
+	require.Len(t, runnable, 1)
+	require.Equal(t, jobs[0].ID, runnable[0].ID)
+	require.Equal(t, service.MailSyncTriggerSourceRetry, runnable[0].TriggerSource)
+}
+
 func TestMailboxRepository_ListHeadersFiltersByCollectorAndFolder(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)

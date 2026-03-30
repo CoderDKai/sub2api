@@ -235,8 +235,56 @@ func TestMailboxSyncRunnerService_RunDueCreatesScheduleJobsBeforeExecuting(t *te
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)
 	require.Equal(t, MailSyncTriggerSourceSchedule, jobs[0].TriggerSource)
-	require.Equal(t, []string{"claim_due", "create_jobs"}, repo.events[:2])
+	require.Equal(t, []string{"list_retry_jobs", "claim_due", "create_jobs"}, repo.events[:3])
 	require.Contains(t, repo.events, "provider_list")
+}
+
+func TestMailboxSyncRunnerService_RunDueExecutesRunnableRetryJobs(t *testing.T) {
+	fixedNow := time.Date(2026, 3, 30, 11, 15, 0, 0, time.UTC)
+	repo := newMailboxSyncRepositoryStub()
+	repo.providers[3] = &ProviderAccount{ID: 3, ProviderKind: MailboxProviderKindBasic, AuthKind: ProviderAuthKindBasic, EncryptedPayload: `{"protocol":"imap","host":"imap.example.com","username":"boss@example.com","password":"secret"}`}
+	repo.capabilities[11] = &MailboxCapability{ID: 11, ProviderAccountID: 3, CollectorID: 7, CapabilityKind: "imap-primary", ConnectionConfig: MailboxConnectionConfig{"folder": "INBOX"}, CursorState: MailboxCursorState{mailboxSyncCursorInitializedKey: true}, SyncEnabled: true, HealthState: MailboxCapabilityStateWarning}
+	repo.jobs[301] = &MailSyncJob{ID: 301, CapabilityID: 11, State: MailSyncJobStateQueued, TriggerSource: MailSyncTriggerSourceRetry, ScheduledFor: fixedNow.Add(-1 * time.Minute), Retryable: true, RetryCount: 1, NextRetryAt: ptrTime(fixedNow.Add(-30 * time.Second))}
+
+	provider := &syncProviderClientStub{headerPage: &mailboxpkg.HeaderPage{Headers: []mailboxpkg.Header{}}}
+	syncSvc := newMailboxSyncServiceForTest(repo, &syncResolverStub{})
+	syncSvc.now = func() time.Time { return fixedNow }
+	syncSvc.providers = map[string]mailboxpkg.ProviderClient{MailboxProviderKindBasic: provider}
+	runner := NewMailboxSyncRunnerService(repo, syncSvc)
+	runner.now = func() time.Time { return fixedNow }
+
+	jobs, err := runner.RunDue(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, int64(301), jobs[0].ID)
+	require.Equal(t, MailSyncJobStateSucceeded, repo.jobs[301].State)
+	require.Len(t, provider.listCalls, 1)
+	require.Equal(t, []string{"list_retry_jobs", "provider_list"}, repo.events[:2])
+}
+
+func TestMailboxSyncRunnerService_RunDueExecutesRetryJobsBeforeScheduleClaims(t *testing.T) {
+	fixedNow := time.Date(2026, 3, 30, 11, 20, 0, 0, time.UTC)
+	repo := newMailboxSyncRepositoryStub()
+	repo.providers[3] = &ProviderAccount{ID: 3, ProviderKind: MailboxProviderKindBasic, AuthKind: ProviderAuthKindBasic, EncryptedPayload: `{"protocol":"imap","host":"imap.example.com","username":"boss@example.com","password":"secret"}`}
+	repo.capabilities[11] = &MailboxCapability{ID: 11, ProviderAccountID: 3, CollectorID: 7, CapabilityKind: "imap-primary", ConnectionConfig: MailboxConnectionConfig{"folder": "INBOX"}, CursorState: MailboxCursorState{mailboxSyncCursorInitializedKey: true}, SyncEnabled: true, HealthState: MailboxCapabilityStateWarning, NextSyncAt: ptrTime(fixedNow.Add(-1 * time.Minute))}
+	repo.retryJobBlocksClaims = true
+	repo.claimedCapabilityIDs = []int64{11}
+	repo.jobs[302] = &MailSyncJob{ID: 302, CapabilityID: 11, State: MailSyncJobStateQueued, TriggerSource: MailSyncTriggerSourceRetry, ScheduledFor: fixedNow.Add(-2 * time.Minute), Retryable: true, RetryCount: 1, NextRetryAt: ptrTime(fixedNow.Add(-30 * time.Second))}
+
+	provider := &syncProviderClientStub{headerPage: &mailboxpkg.HeaderPage{Headers: []mailboxpkg.Header{}}}
+	syncSvc := newMailboxSyncServiceForTest(repo, &syncResolverStub{})
+	syncSvc.now = func() time.Time { return fixedNow }
+	syncSvc.providers = map[string]mailboxpkg.ProviderClient{MailboxProviderKindBasic: provider}
+	runner := NewMailboxSyncRunnerService(repo, syncSvc)
+	runner.now = func() time.Time { return fixedNow }
+
+	jobs, err := runner.RunDue(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, jobs, 2)
+	require.Equal(t, MailSyncJobStateSucceeded, repo.jobs[302].State)
+	require.Equal(t, MailSyncTriggerSourceSchedule, repo.jobs[jobs[1].ID].TriggerSource)
+	require.Len(t, provider.listCalls, 2)
+	require.Equal(t, []string{"list_retry_jobs", "provider_list", "claim_due", "create_jobs", "provider_list"}, repo.events[:5])
 }
 
 func TestMailboxSyncRunnerService_RunDueRequeuesCapabilitiesWhenScheduleJobCreationFails(t *testing.T) {
@@ -255,6 +303,7 @@ func TestMailboxSyncRunnerService_RunDueRequeuesCapabilitiesWhenScheduleJobCreat
 	}
 	repo.claimedCapabilityIDs = []int64{11}
 	repo.claimAdvanceTo = &futureSync
+	repo.trackRequeueUpdates = true
 	repo.createSyncErr = errors.New("insert failed")
 
 	syncSvc := newMailboxSyncServiceForTest(repo, &syncResolverStub{})
@@ -264,7 +313,7 @@ func TestMailboxSyncRunnerService_RunDueRequeuesCapabilitiesWhenScheduleJobCreat
 
 	jobs, err := runner.RunDue(context.Background(), 10)
 	require.Error(t, err)
-	require.Nil(t, jobs)
+	require.Empty(t, jobs)
 	require.NotNil(t, repo.capabilities[11].NextSyncAt)
 	require.Equal(t, fixedNow, repo.capabilities[11].NextSyncAt.UTC())
 	require.Contains(t, repo.events, "requeue_due")
@@ -310,6 +359,8 @@ type mailboxSyncRepositoryStub struct {
 	createSyncJobsRelease chan struct{}
 	createSyncJobsOnce    sync.Once
 	claimAdvanceTo        *time.Time
+	retryJobBlocksClaims  bool
+	trackRequeueUpdates   bool
 	jobUpdateErr          error
 	createSyncErr         error
 	claimErr              error
@@ -416,6 +467,9 @@ func (r *mailboxSyncRepositoryStub) ClaimDueCapabilities(ctx context.Context, no
 	r.events = append(r.events, "claim_due")
 	items := make([]*MailboxCapability, 0, len(r.claimedCapabilityIDs))
 	for _, id := range r.claimedCapabilityIDs {
+		if r.retryJobBlocksClaims && r.hasQueuedOrRunningJobForCapability(id) {
+			continue
+		}
 		if r.claimAdvanceTo != nil {
 			repoCap := cloneMailboxCapability(r.capabilities[id])
 			repoCap.NextSyncAt = cloneTimePtr(r.claimAdvanceTo)
@@ -426,12 +480,32 @@ func (r *mailboxSyncRepositoryStub) ClaimDueCapabilities(ctx context.Context, no
 	return items, nil
 }
 
+func (r *mailboxSyncRepositoryStub) ListRunnableRetrySyncJobs(ctx context.Context, now time.Time, limit int) ([]*MailSyncJob, error) {
+	r.events = append(r.events, "list_retry_jobs")
+	items := make([]*MailSyncJob, 0)
+	for _, job := range r.jobs {
+		if job == nil || job.State != MailSyncJobStateQueued || job.TriggerSource != MailSyncTriggerSourceRetry {
+			continue
+		}
+		if job.NextRetryAt == nil || job.NextRetryAt.After(now) {
+			continue
+		}
+		items = append(items, cloneMailSyncJob(job))
+	}
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
 func (r *mailboxSyncRepositoryStub) UpdateCapability(ctx context.Context, capability *MailboxCapability) (*MailboxCapability, error) {
 	updated, err := r.mailboxRepositoryStub.UpdateCapability(ctx, capability)
 	if err != nil {
 		return nil, err
 	}
-	r.events = append(r.events, "requeue_due")
+	if r.trackRequeueUpdates {
+		r.events = append(r.events, "requeue_due")
+	}
 	return updated, nil
 }
 
@@ -474,6 +548,18 @@ func (r *mailboxSyncRepositoryStub) lastCreatedJob() *MailSyncJob {
 		return nil
 	}
 	return cloneMailSyncJob(r.createdJobs[len(r.createdJobs)-1])
+}
+
+func (r *mailboxSyncRepositoryStub) hasQueuedOrRunningJobForCapability(capabilityID int64) bool {
+	for _, job := range r.jobs {
+		if job == nil || job.CapabilityID != capabilityID {
+			continue
+		}
+		if job.State == MailSyncJobStateQueued || job.State == MailSyncJobStateRunning {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *mailboxSyncRepositoryStub) mustHeaderByRemoteID(t *testing.T, capabilityID int64, folder, remoteMessageID string) *MailHeader {
