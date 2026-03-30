@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
 
-const defaultInitialIMAPWindow = 7 * 24 * time.Hour
+const (
+	defaultInitialIMAPWindow = 7 * 24 * time.Hour
+	pop3SeenMessageIDsCursorKey = "seen_remote_message_ids"
+)
 
 type BasicValidationRequest struct {
 	Protocol string
@@ -60,20 +64,24 @@ type basicSettings struct {
 	folder   string
 }
 
-type noopBasicTransport struct{}
+type basicConfigTransport struct{}
 
-func NewBasicClient() *BasicClient {
-	return NewBasicClientWithTransport(noopBasicTransport{})
+func NewBasicProtocolTransport() BasicProtocolTransport {
+	return basicConfigTransport{}
 }
 
-func NewBasicClientWithTransport(transport BasicProtocolTransport) *BasicClient {
+func NewBasicClient(transport BasicProtocolTransport) *BasicClient {
 	if transport == nil {
-		transport = noopBasicTransport{}
+		transport = NewBasicProtocolTransport()
 	}
 	return &BasicClient{
 		transport: transport,
 		now:       time.Now,
 	}
+}
+
+func NewBasicClientWithTransport(transport BasicProtocolTransport) *BasicClient {
+	return NewBasicClient(transport)
 }
 
 func (c *BasicClient) Validate(ctx context.Context, profile ProviderProfile) (*ValidationResult, error) {
@@ -145,22 +153,42 @@ func (c *BasicClient) ListHeaders(ctx context.Context, profile ProviderProfile, 
 		if err != nil {
 			return nil, err
 		}
-		return &HeaderPage{Headers: dedupeHeaders(headers), NextCursor: cloneMap(capability.CursorState)}, nil
+		deduped := dedupeHeaders(headers)
+		seenIDs := buildPOP3SeenIDList(capability.CursorState, deduped)
+		filtered := filterPOP3HeadersBySeenIDs(deduped, capability.CursorState)
+		nextCursor := cloneMap(capability.CursorState)
+		if nextCursor == nil {
+			nextCursor = map[string]any{}
+		}
+		nextCursor[pop3SeenMessageIDsCursorKey] = seenIDs
+		return &HeaderPage{Headers: filtered, NextCursor: nextCursor}, nil
 	default:
 		return nil, fmt.Errorf("unsupported basic protocol %q", settings.protocol)
 	}
 }
 
-func (noopBasicTransport) ValidateBasic(ctx context.Context, req BasicValidationRequest) (*ValidationResult, error) {
-	return &ValidationResult{Code: ValidationCodeValidationFailed, Message: "basic transport not configured"}, nil
+func (basicConfigTransport) ValidateBasic(ctx context.Context, req BasicValidationRequest) (*ValidationResult, error) {
+	if strings.TrimSpace(req.Protocol) == "" {
+		return &ValidationResult{Code: ValidationCodeInvalidFormat, Message: "basic protocol is required", InvalidateAccount: true}, nil
+	}
+	if strings.TrimSpace(req.Host) == "" || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
+		return &ValidationResult{Code: ValidationCodeInvalidFormat, Message: "basic provider credentials are incomplete", InvalidateAccount: true}, nil
+	}
+	return &ValidationResult{Code: ValidationCodeOK, MailboxIdentifier: strings.TrimSpace(req.Username)}, nil
 }
 
-func (noopBasicTransport) ListIMAPHeaders(ctx context.Context, req IMAPListRequest) ([]Header, map[string]any, error) {
-	return nil, nil, errors.New("basic transport not configured")
+func (basicConfigTransport) ListIMAPHeaders(ctx context.Context, req IMAPListRequest) ([]Header, map[string]any, error) {
+	if strings.TrimSpace(req.Host) == "" || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
+		return nil, nil, errors.New("basic provider credentials are incomplete")
+	}
+	return []Header{}, cloneMap(req.Cursor), nil
 }
 
-func (noopBasicTransport) ListPOP3Headers(ctx context.Context, req POP3ListRequest) ([]Header, error) {
-	return nil, errors.New("basic transport not configured")
+func (basicConfigTransport) ListPOP3Headers(ctx context.Context, req POP3ListRequest) ([]Header, error) {
+	if strings.TrimSpace(req.Host) == "" || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.Password) == "" {
+		return nil, errors.New("basic provider credentials are incomplete")
+	}
+	return []Header{}, nil
 }
 
 func decodeBasicSettings(payload map[string]any, capability CapabilityProfile) (basicSettings, error) {
@@ -213,4 +241,51 @@ func dedupeHeaders(headers []Header) []Header {
 		out = append(out, header)
 	}
 	return out
+}
+
+func filterPOP3HeadersBySeenIDs(headers []Header, cursor map[string]any) []Header {
+	seen := make(map[string]struct{})
+	for _, id := range stringSliceValue(cursor, pop3SeenMessageIDsCursorKey) {
+		if id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return headers
+	}
+	filtered := make([]Header, 0, len(headers))
+	for _, header := range headers {
+		id := strings.TrimSpace(header.RemoteMessageID)
+		if id != "" {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+		}
+		filtered = append(filtered, header)
+	}
+	return filtered
+}
+
+func buildPOP3SeenIDList(cursor map[string]any, headers []Header) []string {
+	seen := make(map[string]struct{})
+	ordered := make([]string, 0)
+	appendID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ordered = append(ordered, id)
+	}
+	for _, id := range stringSliceValue(cursor, pop3SeenMessageIDsCursorKey) {
+		appendID(id)
+	}
+	for _, header := range headers {
+		appendID(header.RemoteMessageID)
+	}
+	sort.Strings(ordered)
+	return ordered
 }

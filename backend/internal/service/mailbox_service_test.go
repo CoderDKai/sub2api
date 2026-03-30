@@ -1,5 +1,3 @@
-//go:build unit
-
 package service
 
 import (
@@ -622,8 +620,8 @@ func cloneMailboxCapability(in *MailboxCapability) *MailboxCapability {
 		return nil
 	}
 	clone := *in
-	clone.ConnectionConfig = MailboxConnectionConfig(cloneMapStringAny(in.ConnectionConfig))
-	clone.CursorState = MailboxCursorState(cloneMapStringAny(in.CursorState))
+	clone.ConnectionConfig = MailboxConnectionConfig(mailboxCloneMapStringAny(in.ConnectionConfig))
+	clone.CursorState = MailboxCursorState(mailboxCloneMapStringAny(in.CursorState))
 	clone.NextSyncAt = cloneTimePtr(in.NextSyncAt)
 	clone.LastSyncAt = cloneTimePtr(in.LastSyncAt)
 	clone.LastError = cloneStringPtr(in.LastError)
@@ -645,12 +643,12 @@ func cloneRecipientMatchValue(in *RecipientMatchValue) *RecipientMatchValue {
 		return nil
 	}
 	clone := *in
-	clone.SourceMetadata = RecipientMatchSourceMetadata(cloneMapStringAny(in.SourceMetadata))
+	clone.SourceMetadata = RecipientMatchSourceMetadata(mailboxCloneMapStringAny(in.SourceMetadata))
 	clone.DisabledAt = cloneTimePtr(in.DisabledAt)
 	return &clone
 }
 
-func cloneMapStringAny(in map[string]any) map[string]any {
+func mailboxCloneMapStringAny(in map[string]any) map[string]any {
 	if in == nil {
 		return nil
 	}

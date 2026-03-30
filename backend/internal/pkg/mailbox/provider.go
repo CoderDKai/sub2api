@@ -138,16 +138,25 @@ func stringSliceValue(m map[string]any, key string) []string {
 	if !ok {
 		return nil
 	}
-	slice, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(slice))
-	for _, item := range slice {
-		s, ok := item.(string)
-		if ok && strings.TrimSpace(s) != "" {
-			out = append(out, strings.TrimSpace(s))
+	var out []string
+	switch slice := v.(type) {
+	case []any:
+		out = make([]string, 0, len(slice))
+		for _, item := range slice {
+			s, ok := item.(string)
+			if ok && strings.TrimSpace(s) != "" {
+				out = append(out, strings.TrimSpace(s))
+			}
 		}
+	case []string:
+		out = make([]string, 0, len(slice))
+		for _, item := range slice {
+			if strings.TrimSpace(item) != "" {
+				out = append(out, strings.TrimSpace(item))
+			}
+		}
+	default:
+		return nil
 	}
 	return out
 }

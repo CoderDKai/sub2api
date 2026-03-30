@@ -491,6 +491,7 @@ var ProviderSet = wire.NewSet(
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,
+	mailboxpkg.NewBasicProtocolTransport,
 	mailboxpkg.NewBasicClient,
 	mailboxpkg.NewMicrosoftClient,
 	NewMailboxAuditLogger,

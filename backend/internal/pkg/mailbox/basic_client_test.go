@@ -1,5 +1,3 @@
-//go:build unit
-
 package mailbox
 
 import (
@@ -105,4 +103,68 @@ func TestBasicClientPOP3DeduplicatesRemoteMessageIDs(t *testing.T) {
 	require.Len(t, page.Headers, 2)
 	require.Equal(t, "msg-1", page.Headers[0].RemoteMessageID)
 	require.Equal(t, "msg-2", page.Headers[1].RemoteMessageID)
+	require.Equal(t, []string{"msg-1", "msg-2"}, page.NextCursor[pop3SeenMessageIDsCursorKey])
+}
+
+func TestBasicClientPOP3FiltersPreviouslySeenMessagesAndAdvancesCursor(t *testing.T) {
+	transport := &basicTransportStub{
+		pop3Headers: []Header{
+			{RemoteMessageID: "msg-1", Subject: "already seen"},
+			{RemoteMessageID: "msg-2", Subject: "new"},
+		},
+	}
+	client := NewBasicClientWithTransport(transport)
+
+	page, err := client.ListHeaders(context.Background(), ProviderProfile{
+		ProviderKind: "basic",
+		AuthKind:     "basic",
+		Payload: map[string]any{
+			"protocol": "pop3",
+			"host":     "pop3.example.com",
+			"username": "alice@example.com",
+			"password": "secret",
+		},
+	}, CapabilityProfile{
+		Kind:             "pop3",
+		ConnectionConfig: map[string]any{"folder": "INBOX"},
+		CursorState:      map[string]any{pop3SeenMessageIDsCursorKey: []string{"msg-1"}},
+	}, 10)
+	require.NoError(t, err)
+	require.Len(t, page.Headers, 1)
+	require.Equal(t, "msg-2", page.Headers[0].RemoteMessageID)
+	require.Equal(t, []string{"msg-1", "msg-2"}, page.NextCursor[pop3SeenMessageIDsCursorKey])
+}
+
+func TestBasicConfigTransportMakesBasicClientMinimallyUsable(t *testing.T) {
+	client := NewBasicClient(NewBasicProtocolTransport())
+
+	result, err := client.Validate(context.Background(), ProviderProfile{
+		ProviderKind: "basic",
+		AuthKind:     "basic",
+		Payload: map[string]any{
+			"protocol": "imap",
+			"host":     "imap.example.com",
+			"username": "alice@example.com",
+			"password": "secret",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, ValidationCodeOK, result.Code)
+
+	page, err := client.ListHeaders(context.Background(), ProviderProfile{
+		ProviderKind: "basic",
+		AuthKind:     "basic",
+		Payload: map[string]any{
+			"protocol": "imap",
+			"host":     "imap.example.com",
+			"username": "alice@example.com",
+			"password": "secret",
+		},
+	}, CapabilityProfile{
+		Kind:             "imap",
+		ConnectionConfig: map[string]any{"folder": "INBOX"},
+	}, 5)
+	require.NoError(t, err)
+	require.NotNil(t, page)
+	require.Empty(t, page.Headers)
 }
