@@ -3,9 +3,20 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type noopUpdateCache struct{}
+
+func (noopUpdateCache) GetUpdateInfo(context.Context) (string, error) {
+	return "", context.Canceled
+}
+
+func (noopUpdateCache) SetUpdateInfo(context.Context, string, time.Duration) error {
+	return nil
+}
 
 type stubUpdateGitHubReleaseClient struct {
 	repo string
@@ -43,7 +54,7 @@ func TestCompareVersions_UsesNumericSemverOnly(t *testing.T) {
 
 func TestCheckUpdate_UsesInjectedRepo(t *testing.T) {
 	client := &stubUpdateGitHubReleaseClient{}
-	svc := NewUpdateService(nil, client, "1.0.0", "release", "CoderDKai/sub2api")
+	svc := NewUpdateService(noopUpdateCache{}, client, "1.0.0", "release", "CoderDKai/sub2api")
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, "CoderDKai/sub2api", client.repo)
