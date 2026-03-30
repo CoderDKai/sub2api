@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,33 @@ func TestMailboxSyncService_CreateBatchSyncJobsRejectsConcurrentCapabilitySync(t
 	_, err := svc.CreateBatchSyncJobs(context.Background(), MailboxBatchSyncRequest{CapabilityIDs: []int64{11}})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already active")
+}
+
+func TestMailboxSyncService_CreateBatchSyncJobsRejectsInProcessConcurrentCapabilitySync(t *testing.T) {
+	repo := newMailboxSyncRepositoryStub()
+	repo.capabilities[11] = &MailboxCapability{ID: 11, ProviderAccountID: 1, CollectorID: 7, CapabilityKind: "imap-primary", SyncEnabled: true, HealthState: MailboxCapabilityStateHealthy}
+	repo.createSyncJobsStarted = make(chan struct{}, 1)
+	repo.createSyncJobsRelease = make(chan struct{})
+
+	svc := newMailboxSyncServiceForTest(repo, &syncResolverStub{})
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := svc.CreateBatchSyncJobs(context.Background(), MailboxBatchSyncRequest{CapabilityIDs: []int64{11}})
+		errCh <- err
+	}()
+
+	select {
+	case <-repo.createSyncJobsStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first create_sync_jobs call")
+	}
+
+	_, err := svc.CreateBatchSyncJobs(context.Background(), MailboxBatchSyncRequest{CapabilityIDs: []int64{11}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already in progress")
+
+	close(repo.createSyncJobsRelease)
+	require.NoError(t, <-errCh)
 }
 
 func TestMailboxSyncService_CreateBatchSyncJobsExpandsCollectorIDsToInboundCapabilities(t *testing.T) {
@@ -117,6 +145,11 @@ func TestMailboxSyncService_RunSyncJobPersistsHeadersCursorResolutionAndJobState
 	job, err := svc.RunSyncJob(context.Background(), 91)
 	require.NoError(t, err)
 	require.NotNil(t, job)
+	require.Len(t, provider.listCalls, 1)
+	require.Equal(t, 500, provider.listCalls[0].Limit)
+	require.NotNil(t, provider.listCalls[0].Capability.InitialBackfillSince)
+	require.Equal(t, fixedNow.Add(-30*24*time.Hour), provider.listCalls[0].Capability.InitialBackfillSince.UTC())
+	require.Equal(t, 500, provider.listCalls[0].Capability.InitialBackfillPerDirection)
 	require.Equal(t, MailSyncJobStateSucceeded, job.State)
 	require.NotNil(t, job.StartedAt)
 	require.NotNil(t, job.FinishedAt)
@@ -181,21 +214,24 @@ func TestMailboxSyncRunnerService_RunDueCreatesScheduleJobsBeforeExecuting(t *te
 
 type mailboxSyncRepositoryStub struct {
 	*mailboxRepositoryStub
-	headers              map[int64]*MailHeader
-	headerKeys           map[string]int64
-	jobs                 map[int64]*MailSyncJob
-	nextHeaderID         int64
-	nextJobID            int64
-	claimedCapabilityIDs []int64
-	events               []string
-	createdJobs          []*MailSyncJob
-	updatedHeaders       []*MailHeader
-	updatedJobs          []*MailSyncJob
-	jobUpdateErr         error
-	createSyncErr        error
-	claimErr             error
-	upsertHeaderErr      error
-	updateHeaderErr      error
+	headers               map[int64]*MailHeader
+	headerKeys            map[string]int64
+	jobs                  map[int64]*MailSyncJob
+	nextHeaderID          int64
+	nextJobID             int64
+	claimedCapabilityIDs  []int64
+	events                []string
+	createdJobs           []*MailSyncJob
+	updatedHeaders        []*MailHeader
+	updatedJobs           []*MailSyncJob
+	createSyncJobsStarted chan struct{}
+	createSyncJobsRelease chan struct{}
+	createSyncJobsOnce    sync.Once
+	jobUpdateErr          error
+	createSyncErr         error
+	claimErr              error
+	upsertHeaderErr       error
+	updateHeaderErr       error
 }
 
 func newMailboxSyncRepositoryStub() *mailboxSyncRepositoryStub {
@@ -219,6 +255,14 @@ func (r *mailboxSyncRepositoryStub) GetHeaderByID(ctx context.Context, id int64)
 func (r *mailboxSyncRepositoryStub) CreateSyncJobs(ctx context.Context, jobs []*MailSyncJob) ([]*MailSyncJob, error) {
 	if r.createSyncErr != nil {
 		return nil, r.createSyncErr
+	}
+	if r.createSyncJobsStarted != nil {
+		r.createSyncJobsOnce.Do(func() {
+			r.createSyncJobsStarted <- struct{}{}
+		})
+	}
+	if r.createSyncJobsRelease != nil {
+		<-r.createSyncJobsRelease
 	}
 	r.events = append(r.events, "create_jobs")
 	created := make([]*MailSyncJob, 0, len(jobs))

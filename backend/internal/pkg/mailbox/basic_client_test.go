@@ -74,6 +74,36 @@ func TestBasicClientIMAPUsesBoundedRequestOnInitialListHeaders(t *testing.T) {
 	require.Equal(t, "INBOX", transport.imapRequests[0].Folder)
 }
 
+func TestBasicClientIMAPUsesExplicitInitialBackfillWindowFromCapability(t *testing.T) {
+	fixedNow := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
+	explicitSince := fixedNow.Add(-30 * 24 * time.Hour)
+	transport := &basicTransportStub{}
+	client := NewBasicClientWithTransport(transport)
+	client.now = func() time.Time { return fixedNow }
+
+	page, err := client.ListHeaders(context.Background(), ProviderProfile{
+		ProviderKind: "basic",
+		AuthKind:     "basic",
+		Payload: map[string]any{
+			"protocol": "imap",
+			"host":     "imap.example.com",
+			"username": "alice@example.com",
+			"password": "secret",
+		},
+	}, CapabilityProfile{
+		Kind:                        "imap",
+		ConnectionConfig:            map[string]any{"folder": "INBOX"},
+		InitialBackfillSince:        &explicitSince,
+		InitialBackfillPerDirection: 500,
+	}, 800)
+	require.NoError(t, err)
+	require.NotNil(t, page)
+	require.Len(t, transport.imapRequests, 1)
+	require.True(t, transport.imapRequests[0].Bounded)
+	require.Equal(t, explicitSince, transport.imapRequests[0].Since)
+	require.Equal(t, 500, transport.imapRequests[0].Limit)
+}
+
 func TestBasicClientPOP3DeduplicatesRemoteMessageIDs(t *testing.T) {
 	transport := &basicTransportStub{
 		pop3Headers: []Header{

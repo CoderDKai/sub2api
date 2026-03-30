@@ -26,13 +26,13 @@ type microsoftProfileResponse struct {
 
 type microsoftMessagesResponse struct {
 	Value []struct {
-		ID                  string `json:"id"`
-		Subject             string `json:"subject"`
-		BodyPreview         string `json:"bodyPreview"`
-		ReceivedDateTime    string `json:"receivedDateTime"`
-		From                microsoftAddressContainer   `json:"from"`
-		ToRecipients        []microsoftAddressContainer `json:"toRecipients"`
-		CCRecipients        []microsoftAddressContainer `json:"ccRecipients"`
+		ID                     string                      `json:"id"`
+		Subject                string                      `json:"subject"`
+		BodyPreview            string                      `json:"bodyPreview"`
+		ReceivedDateTime       string                      `json:"receivedDateTime"`
+		From                   microsoftAddressContainer   `json:"from"`
+		ToRecipients           []microsoftAddressContainer `json:"toRecipients"`
+		CCRecipients           []microsoftAddressContainer `json:"ccRecipients"`
 		InternetMessageHeaders []struct {
 			Name  string `json:"name"`
 			Value string `json:"value"`
@@ -126,8 +126,14 @@ func (c *MicrosoftClient) ListHeaders(ctx context.Context, profile ProviderProfi
 	}
 	if strings.TrimSpace(stringValue(capability.CursorState, "next_link")) == "" {
 		query := endpoint.Query()
+		if capability.InitialBackfillPerDirection > 0 && limit > capability.InitialBackfillPerDirection {
+			limit = capability.InitialBackfillPerDirection
+		}
 		query.Set("$top", fmt.Sprintf("%d", limit))
 		query.Set("$select", "id,subject,bodyPreview,receivedDateTime,from,toRecipients,ccRecipients,internetMessageHeaders")
+		if capability.InitialBackfillSince != nil {
+			query.Set("$filter", "receivedDateTime ge "+capability.InitialBackfillSince.UTC().Format(time.RFC3339))
+		}
 		endpoint.RawQuery = query.Encode()
 	}
 

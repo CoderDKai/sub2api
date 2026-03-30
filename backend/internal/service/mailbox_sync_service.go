@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	mailboxpkg "github.com/Wei-Shaw/sub2api/internal/pkg/mailbox"
@@ -53,6 +54,8 @@ type MailboxSyncService struct {
 	resolver         mailboxRecipientResolver
 	audit            MailboxAuditor
 	providers        map[string]mailboxpkg.ProviderClient
+	guardMu          sync.Mutex
+	inFlightCaps     map[int64]struct{}
 	now              func() time.Time
 	contextDecorator func(context.Context) context.Context
 }
@@ -69,11 +72,12 @@ func NewMailboxSyncService(repo MailboxRepository, resolver mailboxRecipientReso
 		audit = NewMailboxAuditLogger()
 	}
 	return &MailboxSyncService{
-		repo:      repo,
-		resolver:  resolver,
-		audit:     audit,
-		providers: providers,
-		now:       time.Now,
+		repo:         repo,
+		resolver:     resolver,
+		audit:        audit,
+		providers:    providers,
+		inFlightCaps: map[int64]struct{}{},
+		now:          time.Now,
 		contextDecorator: func(ctx context.Context) context.Context {
 			return ctx
 		},
@@ -88,6 +92,11 @@ func (s *MailboxSyncService) CreateBatchSyncJobs(ctx context.Context, input Mail
 	if len(capabilities) == 0 {
 		return []*MailSyncJob{}, nil
 	}
+	release, err := s.acquireCapabilityGuards(capabilities)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	activeJobs, err := s.repo.ListActiveSyncJobs(ctx, nil, mailboxSyncActiveJobScanLimit)
 	if err != nil {
 		return nil, err
@@ -173,9 +182,9 @@ func (s *MailboxSyncService) BuildListHeadersRequest(ctx context.Context, capabi
 		since := s.now().UTC().Add(-mailboxSyncInitialBackfillDays * 24 * time.Hour)
 		req.InitialBackfillSince = &since
 		req.InitialBackfillPerDirection = mailboxSyncInitialBackfillPerDir
-		if req.Limit > mailboxSyncInitialBackfillPerDir {
-			req.Limit = mailboxSyncInitialBackfillPerDir
-		}
+		req.CapabilityProfile.InitialBackfillSince = &since
+		req.CapabilityProfile.InitialBackfillPerDirection = mailboxSyncInitialBackfillPerDir
+		req.Limit = mailboxSyncInitialBackfillPerDir
 	}
 	return req, nil
 }
@@ -465,6 +474,37 @@ func (s *MailboxSyncService) decorateContext(ctx context.Context) context.Contex
 		return ctx
 	}
 	return s.contextDecorator(ctx)
+}
+
+func (s *MailboxSyncService) acquireCapabilityGuards(capabilities []*MailboxCapability) (func(), error) {
+	if len(capabilities) == 0 {
+		return func() {}, nil
+	}
+	ids := make([]int64, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if capability == nil || capability.ID == 0 {
+			continue
+		}
+		ids = append(ids, capability.ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	s.guardMu.Lock()
+	defer s.guardMu.Unlock()
+	for _, id := range ids {
+		if _, exists := s.inFlightCaps[id]; exists {
+			return nil, fmt.Errorf("capability %d already in progress", id)
+		}
+	}
+	for _, id := range ids {
+		s.inFlightCaps[id] = struct{}{}
+	}
+	return func() {
+		s.guardMu.Lock()
+		defer s.guardMu.Unlock()
+		for _, id := range ids {
+			delete(s.inFlightCaps, id)
+		}
+	}, nil
 }
 
 func applyResolutionResult(header *MailHeader, result *MailboxRecipientResolutionResult) {

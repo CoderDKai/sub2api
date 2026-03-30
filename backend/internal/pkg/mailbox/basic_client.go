@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	defaultInitialIMAPWindow = 7 * 24 * time.Hour
+	defaultInitialIMAPWindow    = 7 * 24 * time.Hour
 	pop3SeenMessageIDsCursorKey = "seen_remote_message_ids"
 )
 
@@ -134,6 +134,12 @@ func (c *BasicClient) ListHeaders(ctx context.Context, profile ProviderProfile, 
 		if len(capability.CursorState) == 0 {
 			request.Bounded = true
 			request.Since = c.now().UTC().Add(-defaultInitialIMAPWindow)
+			if capability.InitialBackfillSince != nil {
+				request.Since = capability.InitialBackfillSince.UTC()
+			}
+			if capability.InitialBackfillPerDirection > 0 && request.Limit > capability.InitialBackfillPerDirection {
+				request.Limit = capability.InitialBackfillPerDirection
+			}
 		}
 		headers, nextCursor, err := c.transport.ListIMAPHeaders(ctx, request)
 		if err != nil {

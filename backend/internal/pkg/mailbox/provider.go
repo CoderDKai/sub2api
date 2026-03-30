@@ -31,9 +31,11 @@ type ProviderProfile struct {
 }
 
 type CapabilityProfile struct {
-	Kind             string
-	ConnectionConfig map[string]any
-	CursorState      map[string]any
+	Kind                        string
+	ConnectionConfig            map[string]any
+	CursorState                 map[string]any
+	InitialBackfillSince        *time.Time
+	InitialBackfillPerDirection int
 }
 
 type ValidationResult struct {

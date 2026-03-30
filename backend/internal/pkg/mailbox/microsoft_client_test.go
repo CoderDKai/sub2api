@@ -122,3 +122,31 @@ func TestMicrosoftClientListHeadersUsesCursorStateNextLink(t *testing.T) {
 	require.NotNil(t, page)
 	require.Empty(t, page.Headers)
 }
+
+func TestMicrosoftClientListHeadersUsesInitialBackfillConstraintsOnFirstSync(t *testing.T) {
+	explicitSince := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/me/mailFolders/Inbox/messages", r.URL.Path)
+		require.Equal(t, "500", r.URL.Query().Get("$top"))
+		require.Contains(t, r.URL.Query().Get("$filter"), "receivedDateTime ge 2026-02-27T12:00:00Z")
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+	}))
+	defer server.Close()
+
+	client := NewMicrosoftClientWithBaseURL(server.Client(), server.URL)
+	page, err := client.ListHeaders(context.Background(), ProviderProfile{
+		ProviderKind: "microsoft",
+		AuthKind:     "oauth2",
+		Payload: map[string]any{
+			"access_token": "token-123",
+		},
+	}, CapabilityProfile{
+		Kind:                        "microsoft_inbox",
+		ConnectionConfig:            map[string]any{"folder": "Inbox"},
+		InitialBackfillSince:        &explicitSince,
+		InitialBackfillPerDirection: 500,
+	}, 900)
+	require.NoError(t, err)
+	require.NotNil(t, page)
+	require.Empty(t, page.Headers)
+}
