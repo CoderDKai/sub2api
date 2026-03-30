@@ -14,7 +14,7 @@ import { resolveDocumentTitle } from './title'
 /**
  * Route definitions with lazy loading
  */
-const routes: RouteRecordRaw[] = [
+export const routes: RouteRecordRaw[] = [
   // ==================== Setup Routes ====================
   {
     path: '/setup',
@@ -300,6 +300,50 @@ const routes: RouteRecordRaw[] = [
       title: 'Account Management',
       titleKey: 'admin.accounts.title',
       descriptionKey: 'admin.accounts.description'
+    }
+  },
+  {
+    path: '/admin/mailbox/providers',
+    name: 'AdminMailboxProviders',
+    component: () => import('@/views/admin/MailboxProvidersView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Mailbox Providers',
+      titleKey: 'admin.mailbox.providers.title'
+    }
+  },
+  {
+    path: '/admin/mailbox/collectors',
+    name: 'AdminMailboxCollectors',
+    component: () => import('@/views/admin/CollectorMailboxesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Collector Mailboxes',
+      titleKey: 'admin.mailbox.collectors.title'
+    }
+  },
+  {
+    path: '/admin/mailbox/recipients',
+    name: 'AdminMailboxRecipients',
+    component: () => import('@/views/admin/RecipientIdentitiesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Recipient Identities',
+      titleKey: 'admin.mailbox.recipients.title'
+    }
+  },
+  {
+    path: '/admin/mailbox/inbox',
+    name: 'AdminMailboxInbox',
+    component: () => import('@/views/admin/MailInboxView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Mail Inbox',
+      titleKey: 'admin.mailbox.inbox.title'
     }
   },
   {

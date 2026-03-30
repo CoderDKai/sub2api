@@ -33,6 +33,7 @@ func ProvideAdminHandlers(
 	tlsFingerprintProfileHandler *admin.TLSFingerprintProfileHandler,
 	apiKeyHandler *admin.AdminAPIKeyHandler,
 	scheduledTestHandler *admin.ScheduledTestHandler,
+	mailboxHandler *admin.MailboxHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:             dashboardHandler,
@@ -59,6 +60,7 @@ func ProvideAdminHandlers(
 		TLSFingerprintProfile: tlsFingerprintProfileHandler,
 		APIKey:                apiKeyHandler,
 		ScheduledTest:         scheduledTestHandler,
+		Mailbox:               mailboxHandler,
 	}
 }
 
@@ -70,6 +72,11 @@ func ProvideSystemHandler(updateService *service.UpdateService, lockService *ser
 // ProvideSettingHandler creates SettingHandler with version from BuildInfo
 func ProvideSettingHandler(settingService *service.SettingService, buildInfo BuildInfo) *SettingHandler {
 	return NewSettingHandler(settingService, buildInfo.Version)
+}
+
+// ProvideMailboxHandler creates admin.MailboxHandler.
+func ProvideMailboxHandler(mailboxService *service.MailboxService, mailboxSyncService *service.MailboxSyncService, mailboxRepository service.MailboxRepository) *admin.MailboxHandler {
+	return admin.NewMailboxHandler(mailboxService, mailboxSyncService, mailboxRepository)
 }
 
 // ProvideHandlers creates the Handlers struct
@@ -150,6 +157,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewTLSFingerprintProfileHandler,
 	admin.NewAdminAPIKeyHandler,
 	admin.NewScheduledTestHandler,
+	ProvideMailboxHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

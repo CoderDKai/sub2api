@@ -352,7 +352,11 @@ export default {
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
     docs: 'Docs',
-    sora: 'Sora Studio'
+    sora: 'Sora Studio',
+    mailboxProviders: 'Mailbox Providers',
+    mailboxCollectors: 'Collector Mailboxes',
+    mailboxRecipients: 'Recipient Identities',
+    mailboxInbox: 'Mail Inbox'
   },
 
   // Auth
@@ -995,6 +999,22 @@ export default {
       requestsShort: 'Req',
       tokensShort: 'Tok',
       failedToLoad: 'Failed to load dashboard statistics'
+    },
+
+    mailbox: {
+      comingSoon: 'Mailbox admin tools are coming soon.',
+      providers: {
+        title: 'Mailbox Providers'
+      },
+      collectors: {
+        title: 'Collector Mailboxes'
+      },
+      recipients: {
+        title: 'Recipient Identities'
+      },
+      inbox: {
+        title: 'Mail Inbox'
+      }
     },
 
     backup: {

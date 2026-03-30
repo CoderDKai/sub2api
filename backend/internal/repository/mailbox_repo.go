@@ -761,6 +761,100 @@ func (r *mailboxRepository) UpdateRecipientIdentity(ctx context.Context, in *ser
 	return scanRecipientIdentity(row)
 }
 
+func (r *mailboxRepository) UpdateRecipientIdentityWithMatchValues(ctx context.Context, in *service.RecipientIdentity, values []*service.RecipientMatchValue) (*service.RecipientIdentity, []*service.RecipientMatchValue, error) {
+	if r == nil || r.db == nil {
+		return nil, nil, errors.New("mailbox repository db is nil")
+	}
+	if in == nil {
+		return nil, nil, errors.New("recipient identity is nil")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowContext(ctx, `
+		UPDATE mailbox_recipient_identities
+		SET
+			name = $2,
+			normalized_name = $3,
+			enabled = $4,
+			updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, name, normalized_name, enabled, created_at, updated_at, deleted_at
+	`, in.ID, in.Name, in.NormalizedName, in.Enabled)
+
+	updated, err := scanRecipientIdentity(row)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE mailbox_recipient_match_values
+		SET
+			active = FALSE,
+			disabled_at = COALESCE(disabled_at, NOW()),
+			updated_at = NOW()
+		WHERE recipient_identity_id = $1 AND active = TRUE
+	`, in.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	replaced := make([]*service.RecipientMatchValue, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		sourceKind := value.SourceKind
+		if sourceKind == "" {
+			sourceKind = "manual"
+		}
+		sourceMetadata, err := marshalJSONB(value.SourceMetadata, []byte("{}"))
+		if err != nil {
+			return nil, nil, err
+		}
+		row := tx.QueryRowContext(ctx, `
+			INSERT INTO mailbox_recipient_match_values (
+				recipient_identity_id,
+				match_type,
+				match_value,
+				normalized_value,
+				active,
+				priority,
+				source_kind,
+				source_metadata,
+				disabled_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+			RETURNING
+				id,
+				recipient_identity_id,
+				match_type,
+				match_value,
+				normalized_value,
+				active,
+				priority,
+				source_kind,
+				source_metadata,
+				created_at,
+				updated_at,
+				disabled_at
+		`, in.ID, value.MatchType, value.MatchValue, value.NormalizedValue, value.Active, value.Priority, sourceKind, string(sourceMetadata), value.DisabledAt)
+		created, err := scanRecipientMatchValue(row)
+		if err != nil {
+			return nil, nil, err
+		}
+		replaced = append(replaced, created)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return updated, replaced, nil
+}
+
 func (r *mailboxRepository) ListRecipientIdentities(ctx context.Context, opts service.MailboxListOptions) ([]*service.RecipientIdentity, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")

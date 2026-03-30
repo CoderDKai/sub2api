@@ -432,6 +432,21 @@ func (r *mailboxRepositoryStub) UpdateRecipientIdentity(ctx context.Context, in 
 	return cloneRecipientIdentity(identity), nil
 }
 
+func (r *mailboxRepositoryStub) UpdateRecipientIdentityWithMatchValues(ctx context.Context, in *RecipientIdentity, values []*RecipientMatchValue) (*RecipientIdentity, []*RecipientMatchValue, error) {
+	identity := cloneRecipientIdentity(in)
+	r.identities[identity.ID] = identity
+	updated := make([]*RecipientMatchValue, 0, len(values))
+	for _, value := range values {
+		r.nextMatchValueID++
+		cloned := cloneRecipientMatchValue(value)
+		cloned.ID = r.nextMatchValueID
+		cloned.RecipientIdentityID = identity.ID
+		updated = append(updated, cloned)
+	}
+	r.matchValues[identity.ID] = updated
+	return cloneRecipientIdentity(identity), updated, nil
+}
+
 func (r *mailboxRepositoryStub) ListRecipientIdentities(ctx context.Context, opts MailboxListOptions) ([]*RecipientIdentity, error) {
 	items := make([]*RecipientIdentity, 0, len(r.identities))
 	for _, identity := range r.identities {

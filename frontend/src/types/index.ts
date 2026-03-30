@@ -2,6 +2,8 @@
  * Core Type Definitions for Sub2API Frontend
  */
 
+export * from './mailbox'
+
 // ==================== Common Types ====================
 
 export interface SelectOption {

@@ -87,6 +87,60 @@ func RegisterAdminRoutes(
 
 		// 定时测试计划
 		registerScheduledTestRoutes(admin, h)
+
+		// Mailbox 管理
+		registerMailboxRoutes(admin, h)
+	}
+}
+
+func registerMailboxRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	mailbox := admin.Group("/mailbox")
+	{
+		providers := mailbox.Group("/providers")
+		{
+			providers.GET("", h.Admin.Mailbox.ListProviders)
+			providers.POST("", h.Admin.Mailbox.CreateProvider)
+			providers.POST("/:id/validate", h.Admin.Mailbox.ValidateProvider)
+			providers.POST("/:id/status", h.Admin.Mailbox.UpdateProviderStatus)
+			providers.PUT("/:id/status", h.Admin.Mailbox.UpdateProviderStatus)
+		}
+
+		collectors := mailbox.Group("/collectors")
+		{
+			collectors.GET("", h.Admin.Mailbox.ListCollectors)
+			collectors.POST("", h.Admin.Mailbox.UpsertCollector)
+			collectors.PUT("/:id", h.Admin.Mailbox.UpdateCollector)
+			collectors.POST("/:id/sync", h.Admin.Mailbox.SyncCollector)
+			collectors.POST("/batch-sync", h.Admin.Mailbox.BatchSyncCollectors)
+			collectors.PUT("/:id/status", h.Admin.Mailbox.UpdateCollectorStatus)
+		}
+
+		capabilities := mailbox.Group("/capabilities")
+		{
+			capabilities.GET("", h.Admin.Mailbox.ListCapabilities)
+			capabilities.POST("", h.Admin.Mailbox.CreateCapability)
+			capabilities.PUT("/:id", h.Admin.Mailbox.UpdateCapability)
+			capabilities.POST("/:id/test", h.Admin.Mailbox.TestCapability)
+			capabilities.PUT("/:id/status", h.Admin.Mailbox.UpdateCapabilityStatus)
+		}
+
+		recipients := mailbox.Group("/recipients")
+		{
+			recipients.GET("", h.Admin.Mailbox.ListRecipients)
+			recipients.POST("", h.Admin.Mailbox.CreateRecipient)
+			recipients.PUT("/:id", h.Admin.Mailbox.UpdateRecipient)
+			recipients.POST("/:id/import-exact-addresses", h.Admin.Mailbox.ImportRecipientExactAddresses)
+			recipients.PUT("/:id/status", h.Admin.Mailbox.UpdateRecipientStatus)
+		}
+
+		inbox := mailbox.Group("/inbox")
+		{
+			inbox.GET("", h.Admin.Mailbox.ListInbox)
+			inbox.GET("/:id", h.Admin.Mailbox.GetInboxHeader)
+			inbox.GET("/:id/detail", h.Admin.Mailbox.GetInboxDetail)
+		}
+
+		mailbox.GET("/sync-jobs/batches/:batch_id", h.Admin.Mailbox.GetBatchSyncStatus)
 	}
 }
 

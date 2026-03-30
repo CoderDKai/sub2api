@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import { routes } from '@/router'
 
 // Mock 导航加载状态
 vi.mock('@/composables/useNavigationLoading', () => {
@@ -292,6 +293,19 @@ describe('路由守卫逻辑', () => {
       }
       const redirect = simulateGuard('/keys', {}, authState)
       expect(redirect).toBeNull()
+    })
+  })
+
+  describe('mailbox 管理路由注册', () => {
+    it.each([
+      '/admin/mailbox/providers',
+      '/admin/mailbox/collectors',
+      '/admin/mailbox/recipients',
+      '/admin/mailbox/inbox'
+    ])('%s 注册为 requiresAdmin 路由', (path) => {
+      const route = routes.find((item) => item.path === path)
+
+      expect(route?.meta?.requiresAdmin).toBe(true)
     })
   })
 

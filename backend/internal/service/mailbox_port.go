@@ -212,6 +212,7 @@ type MailboxRepository interface {
 	CreateRecipientIdentity(ctx context.Context, in *RecipientIdentity, values []*RecipientMatchValue) (*RecipientIdentity, error)
 	GetRecipientIdentityByID(ctx context.Context, id int64) (*RecipientIdentity, error)
 	UpdateRecipientIdentity(ctx context.Context, in *RecipientIdentity) (*RecipientIdentity, error)
+	UpdateRecipientIdentityWithMatchValues(ctx context.Context, in *RecipientIdentity, values []*RecipientMatchValue) (*RecipientIdentity, []*RecipientMatchValue, error)
 	ListRecipientIdentities(ctx context.Context, opts MailboxListOptions) ([]*RecipientIdentity, error)
 	DeleteRecipientIdentity(ctx context.Context, id int64) error
 	ListRecipientMatchValues(ctx context.Context, recipientIdentityID int64) ([]*RecipientMatchValue, error)

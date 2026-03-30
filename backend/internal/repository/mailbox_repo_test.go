@@ -970,6 +970,64 @@ func TestMailboxRepository_ReplaceRecipientMatchValuesRejectsDeletedIdentity(t *
 	require.Empty(t, matchValues)
 }
 
+func TestMailboxRepository_UpdateRecipientIdentityWithMatchValuesRollsBackOnConflict(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+
+	identity, err := repo.CreateRecipientIdentity(ctx, &service.RecipientIdentity{
+		Name:           "Primary Inbox",
+		NormalizedName: "primary inbox",
+		Enabled:        true,
+	}, []*service.RecipientMatchValue{{
+		MatchType:       service.RecipientMatchTypeExactAddress,
+		MatchValue:      "primary@example.com",
+		NormalizedValue: "primary@example.com",
+		Active:          true,
+		Priority:        100,
+		SourceKind:      "manual",
+	}})
+	require.NoError(t, err)
+
+	_, err = repo.CreateRecipientIdentity(ctx, &service.RecipientIdentity{
+		Name:           "Taken Inbox",
+		NormalizedName: "taken inbox",
+		Enabled:        true,
+	}, []*service.RecipientMatchValue{{
+		MatchType:       service.RecipientMatchTypeExactAddress,
+		MatchValue:      "taken@example.com",
+		NormalizedValue: "taken@example.com",
+		Active:          true,
+		Priority:        90,
+		SourceKind:      "manual",
+	}})
+	require.NoError(t, err)
+
+	_, _, err = repo.UpdateRecipientIdentityWithMatchValues(ctx, &service.RecipientIdentity{
+		ID:             identity.ID,
+		Name:           "Updated Inbox",
+		NormalizedName: "updated inbox",
+		Enabled:        false,
+	}, []*service.RecipientMatchValue{{
+		MatchType:       service.RecipientMatchTypeExactAddress,
+		MatchValue:      "taken@example.com",
+		NormalizedValue: "taken@example.com",
+		Active:          true,
+		Priority:        50,
+		SourceKind:      "manual",
+	}})
+	require.Error(t, err)
+
+	gotIdentity, err := repo.GetRecipientIdentityByID(ctx, identity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Primary Inbox", gotIdentity.Name)
+	require.True(t, gotIdentity.Enabled)
+
+	matchValues, err := repo.ListRecipientMatchValues(ctx, identity.ID)
+	require.NoError(t, err)
+	require.Len(t, matchValues, 1)
+	require.Equal(t, "primary@example.com", matchValues[0].NormalizedValue)
+}
+
 func TestMailboxRepository_GetHeaderByIDReturnsHydratedDetail(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)

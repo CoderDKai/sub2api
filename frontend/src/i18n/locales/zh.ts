@@ -352,7 +352,11 @@ export default {
     mySubscriptions: '我的订阅',
     buySubscription: '充值/订阅',
     docs: '文档',
-    sora: 'Sora 创作'
+    sora: 'Sora 创作',
+    mailboxProviders: '邮箱提供方',
+    mailboxCollectors: '采集邮箱',
+    mailboxRecipients: '收件人身份',
+    mailboxInbox: '邮件收件箱'
   },
 
   // Auth
@@ -1017,6 +1021,22 @@ export default {
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败'
+    },
+
+    mailbox: {
+      comingSoon: '邮箱管理功能即将上线。',
+      providers: {
+        title: '邮箱提供方'
+      },
+      collectors: {
+        title: '采集邮箱'
+      },
+      recipients: {
+        title: '收件人身份'
+      },
+      inbox: {
+        title: '邮件收件箱'
+      }
     },
 
     backup: {
