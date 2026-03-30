@@ -47,15 +47,16 @@ func (s *MailboxSyncRunnerService) RunDue(ctx context.Context, limit int) ([]*Ma
 		}
 		return nil, err
 	}
+	var runErr error
 	for _, job := range jobs {
 		if job == nil {
 			continue
 		}
 		if _, err := s.syncSvc.RunSyncJob(ctx, job.ID); err != nil {
-			return jobs, err
+			runErr = errors.Join(runErr, err)
 		}
 	}
-	return jobs, nil
+	return jobs, runErr
 }
 
 func (s *MailboxSyncRunnerService) requeueCapabilities(ctx context.Context, capabilities []*MailboxCapability, now time.Time) error {

@@ -244,6 +244,30 @@ func TestMailboxSyncRunnerService_RunDueRequeuesCapabilitiesWhenScheduleJobCreat
 	require.Contains(t, repo.events, "requeue_due")
 }
 
+func TestMailboxSyncRunnerService_RunDueContinuesExecutingRemainingJobsAfterFailure(t *testing.T) {
+	fixedNow := time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC)
+	repo := newMailboxSyncRepositoryStub()
+	repo.providers[3] = &ProviderAccount{ID: 3, ProviderKind: MailboxProviderKindBasic, AuthKind: ProviderAuthKindBasic, EncryptedPayload: `{"protocol":"imap","host":"imap.example.com","username":"boss@example.com","password":"secret"}`}
+	repo.capabilities[11] = &MailboxCapability{ID: 11, ProviderAccountID: 3, CollectorID: 7, CapabilityKind: "imap-primary", ConnectionConfig: MailboxConnectionConfig{"folder": "INBOX"}, SyncEnabled: false, HealthState: MailboxCapabilityStateHealthy}
+	repo.capabilities[12] = &MailboxCapability{ID: 12, ProviderAccountID: 3, CollectorID: 8, CapabilityKind: "imap-secondary", ConnectionConfig: MailboxConnectionConfig{"folder": "INBOX"}, SyncEnabled: true, HealthState: MailboxCapabilityStateHealthy}
+	repo.claimedCapabilityIDs = []int64{11, 12}
+
+	provider := &syncProviderClientStub{headerPage: &mailboxpkg.HeaderPage{Headers: []mailboxpkg.Header{}}}
+	syncSvc := newMailboxSyncServiceForTest(repo, &syncResolverStub{})
+	syncSvc.now = func() time.Time { return fixedNow }
+	syncSvc.providers = map[string]mailboxpkg.ProviderClient{MailboxProviderKindBasic: provider}
+	runner := NewMailboxSyncRunnerService(repo, syncSvc)
+	runner.now = func() time.Time { return fixedNow }
+
+	jobs, err := runner.RunDue(context.Background(), 10)
+	require.Error(t, err)
+	require.Len(t, jobs, 2)
+	require.Equal(t, MailSyncJobStateFailed, repo.jobs[jobs[0].ID].State)
+	require.Equal(t, MailSyncJobStateSucceeded, repo.jobs[jobs[1].ID].State)
+	require.NotEqual(t, MailSyncJobStateQueued, repo.jobs[jobs[1].ID].State)
+	require.Len(t, provider.listCalls, 1)
+}
+
 type mailboxSyncRepositoryStub struct {
 	*mailboxRepositoryStub
 	headers               map[int64]*MailHeader
