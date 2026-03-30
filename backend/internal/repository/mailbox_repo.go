@@ -1107,6 +1107,194 @@ func (r *mailboxRepository) ListHeaders(ctx context.Context, filter service.Mail
 	return headers, total, nil
 }
 
+func (r *mailboxRepository) UpsertSyncHeaders(ctx context.Context, headers []*service.MailHeader) ([]*service.MailHeader, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if len(headers) == 0 {
+		return []*service.MailHeader{}, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	persisted := make([]*service.MailHeader, 0, len(headers))
+	for _, header := range headers {
+		if header == nil {
+			continue
+		}
+		if err := ensureSyncJobCapabilityActive(ctx, tx, header.CapabilityID); err != nil {
+			return nil, err
+		}
+		recipients, err := marshalJSONB(header.Recipients, []byte("[]"))
+		if err != nil {
+			return nil, err
+		}
+		flags, err := marshalJSONB(header.Flags, []byte("[]"))
+		if err != nil {
+			return nil, err
+		}
+		envelopeRecipients, err := marshalJSONB(header.EnvelopeRecipients, []byte("[]"))
+		if err != nil {
+			return nil, err
+		}
+		deliveredTo, err := marshalJSONB(header.DeliveredTo, []byte("[]"))
+		if err != nil {
+			return nil, err
+		}
+		originalTo, err := marshalJSONB(header.OriginalTo, []byte("[]"))
+		if err != nil {
+			return nil, err
+		}
+		resolutionState := strings.TrimSpace(header.ResolutionState)
+		if resolutionState == "" {
+			resolutionState = service.MailResolutionStateUnresolved
+		}
+		detailFetchState := strings.TrimSpace(header.DetailFetchState)
+		if detailFetchState == "" {
+			detailFetchState = service.MailDetailFetchStateNotRequested
+		}
+
+		row := tx.QueryRowContext(ctx, `
+			INSERT INTO mailbox_header_cache (
+				collector_id,
+				capability_id,
+				remote_message_id,
+				folder,
+				sender,
+				recipients,
+				subject,
+				received_at,
+				flags,
+				snippet,
+				envelope_recipients,
+				delivered_to,
+				original_to,
+				resolution_state,
+				detail_fetch_state
+			) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15)
+			ON CONFLICT (capability_id, folder, remote_message_id) DO UPDATE SET
+				sender = EXCLUDED.sender,
+				recipients = EXCLUDED.recipients,
+				subject = EXCLUDED.subject,
+				received_at = EXCLUDED.received_at,
+				flags = EXCLUDED.flags,
+				snippet = EXCLUDED.snippet,
+				envelope_recipients = EXCLUDED.envelope_recipients,
+				delivered_to = EXCLUDED.delivered_to,
+				original_to = EXCLUDED.original_to,
+				updated_at = NOW()
+			RETURNING
+				id,
+				collector_id,
+				capability_id,
+				remote_message_id,
+				folder,
+				sender,
+				recipients,
+				subject,
+				received_at,
+				flags,
+				snippet,
+				envelope_recipients,
+				delivered_to,
+				original_to,
+				resolved_recipient_identity_id,
+				resolved_address,
+				match_type,
+				matched_value_id,
+				resolution_source_field,
+				resolution_state,
+				detail_fetch_state,
+				created_at,
+				updated_at
+		`, header.CollectorID, header.CapabilityID, header.RemoteMessageID, header.Folder, normalizeOptionalStringArg(header.Sender), string(recipients), header.Subject, header.ReceivedAt, string(flags), header.Snippet, string(envelopeRecipients), string(deliveredTo), string(originalTo), resolutionState, detailFetchState)
+
+		storedHeader, err := scanMailHeader(row)
+		if err != nil {
+			return nil, err
+		}
+		persisted = append(persisted, storedHeader)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return persisted, nil
+}
+
+func (r *mailboxRepository) UpdateHeaderDetail(ctx context.Context, header *service.MailHeader) (*service.MailHeader, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("mailbox repository db is nil")
+	}
+	if header == nil {
+		return nil, errors.New("mail header is nil")
+	}
+
+	resolutionState := strings.TrimSpace(header.ResolutionState)
+	if resolutionState == "" {
+		resolutionState = service.MailResolutionStateUnresolved
+	}
+	detailFetchState := strings.TrimSpace(header.DetailFetchState)
+	if detailFetchState == "" {
+		detailFetchState = service.MailDetailFetchStateNotRequested
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		UPDATE mailbox_header_cache h
+		SET
+			resolved_recipient_identity_id = $2,
+			resolved_address = $3,
+			match_type = $4,
+			matched_value_id = $5,
+			resolution_source_field = $6,
+			resolution_state = $7,
+			detail_fetch_state = $8,
+			updated_at = NOW()
+		WHERE h.id = $1
+			AND EXISTS (
+				SELECT 1
+				FROM mailbox_capabilities c
+				JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id
+				JOIN mailbox_collectors mc ON mc.id = c.collector_id
+				WHERE c.id = h.capability_id
+					AND c.collector_id = h.collector_id
+					AND c.deleted_at IS NULL
+					AND pa.deleted_at IS NULL
+					AND mc.deleted_at IS NULL
+			)
+		RETURNING
+			id,
+			collector_id,
+			capability_id,
+			remote_message_id,
+			folder,
+			sender,
+			recipients,
+			subject,
+			received_at,
+			flags,
+			snippet,
+			envelope_recipients,
+			delivered_to,
+			original_to,
+			resolved_recipient_identity_id,
+			resolved_address,
+			match_type,
+			matched_value_id,
+			resolution_source_field,
+			resolution_state,
+			detail_fetch_state,
+			created_at,
+			updated_at
+	`, header.ID, header.ResolvedRecipientIdentityID, normalizeOptionalStringArg(header.ResolvedAddress), normalizeOptionalStringArg(header.MatchType), header.MatchedValueID, normalizeOptionalStringArg(header.ResolutionSourceField), resolutionState, detailFetchState)
+
+	return scanMailHeader(row)
+}
+
 func (r *mailboxRepository) CreateSyncJobs(ctx context.Context, jobs []*service.MailSyncJob) ([]*service.MailSyncJob, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")

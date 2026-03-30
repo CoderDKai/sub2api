@@ -127,29 +127,29 @@ type RecipientMatchValue struct {
 }
 
 type MailHeader struct {
-	ID                         int64      `json:"id"`
-	CollectorID                int64      `json:"collector_id"`
-	CapabilityID               int64      `json:"capability_id"`
-	RemoteMessageID            string     `json:"remote_message_id"`
-	Folder                     string     `json:"folder"`
-	Sender                     *string    `json:"sender"`
-	Recipients                 []string   `json:"recipients"`
-	Subject                    string     `json:"subject"`
-	ReceivedAt                 time.Time  `json:"received_at"`
-	Flags                      []string   `json:"flags"`
-	Snippet                    string     `json:"snippet"`
-	EnvelopeRecipients         []string   `json:"envelope_recipients"`
-	DeliveredTo                []string   `json:"delivered_to"`
-	OriginalTo                 []string   `json:"original_to"`
+	ID                          int64     `json:"id"`
+	CollectorID                 int64     `json:"collector_id"`
+	CapabilityID                int64     `json:"capability_id"`
+	RemoteMessageID             string    `json:"remote_message_id"`
+	Folder                      string    `json:"folder"`
+	Sender                      *string   `json:"sender"`
+	Recipients                  []string  `json:"recipients"`
+	Subject                     string    `json:"subject"`
+	ReceivedAt                  time.Time `json:"received_at"`
+	Flags                       []string  `json:"flags"`
+	Snippet                     string    `json:"snippet"`
+	EnvelopeRecipients          []string  `json:"envelope_recipients"`
+	DeliveredTo                 []string  `json:"delivered_to"`
+	OriginalTo                  []string  `json:"original_to"`
 	ResolvedRecipientIdentityID *int64    `json:"resolved_recipient_identity_id"`
-	ResolvedAddress            *string    `json:"resolved_address"`
-	MatchType                  *string    `json:"match_type"`
-	MatchedValueID             *int64     `json:"matched_value_id"`
-	ResolutionSourceField      *string    `json:"resolution_source_field"`
-	ResolutionState            string     `json:"resolution_state"`
-	DetailFetchState           string     `json:"detail_fetch_state"`
-	CreatedAt                  time.Time  `json:"created_at"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
+	ResolvedAddress             *string   `json:"resolved_address"`
+	MatchType                   *string   `json:"match_type"`
+	MatchedValueID              *int64    `json:"matched_value_id"`
+	ResolutionSourceField       *string   `json:"resolution_source_field"`
+	ResolutionState             string    `json:"resolution_state"`
+	DetailFetchState            string    `json:"detail_fetch_state"`
+	CreatedAt                   time.Time `json:"created_at"`
+	UpdatedAt                   time.Time `json:"updated_at"`
 }
 
 type MailSyncJob struct {
@@ -220,6 +220,8 @@ type MailboxRepository interface {
 
 	GetHeaderByID(ctx context.Context, id int64) (*MailHeader, error)
 	ListHeaders(ctx context.Context, filter MailHeaderListFilter) ([]*MailHeader, int64, error)
+	UpsertSyncHeaders(ctx context.Context, headers []*MailHeader) ([]*MailHeader, error)
+	UpdateHeaderDetail(ctx context.Context, header *MailHeader) (*MailHeader, error)
 
 	CreateSyncJobs(ctx context.Context, jobs []*MailSyncJob) ([]*MailSyncJob, error)
 	ListSyncJobsByBatchID(ctx context.Context, batchID string) ([]*MailSyncJob, error)

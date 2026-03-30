@@ -159,8 +159,34 @@ func TestMailboxSyncService_RunSyncJobPersistsHeadersCursorResolutionAndJobState
 	require.Equal(t, MailResolutionStateResolved, persisted.ResolutionState)
 	require.NotNil(t, persisted.ResolvedRecipientIdentityID)
 	require.Equal(t, int64(5), *persisted.ResolvedRecipientIdentityID)
-	require.Equal(t, MailboxCursorState{"next": "cursor-2"}, repo.capabilities[11].CursorState)
+	require.Equal(t, MailboxCursorState{"next": "cursor-2", mailboxSyncCursorInitializedKey: true}, repo.capabilities[11].CursorState)
 	require.Equal(t, MailboxCapabilityStateHealthy, repo.capabilities[11].HealthState)
+}
+
+func TestMailboxSyncService_RunSyncJobMarksCapabilityInitializedWhenNextCursorEmpty(t *testing.T) {
+	fixedNow := time.Date(2026, 3, 30, 9, 30, 0, 0, time.UTC)
+	repo := newMailboxSyncRepositoryStub()
+	repo.providers[3] = &ProviderAccount{ID: 3, ProviderKind: MailboxProviderKindBasic, AuthKind: ProviderAuthKindBasic, EncryptedPayload: `{"protocol":"imap","host":"imap.example.com","username":"boss@example.com","password":"secret"}`}
+	repo.capabilities[11] = &MailboxCapability{ID: 11, ProviderAccountID: 3, CollectorID: 7, CapabilityKind: "imap-primary", ConnectionConfig: MailboxConnectionConfig{"folder": "INBOX"}, CursorState: MailboxCursorState{}, SyncEnabled: true, HealthState: MailboxCapabilityStateHealthy}
+	repo.jobs[93] = &MailSyncJob{ID: 93, CapabilityID: 11, State: MailSyncJobStateQueued, TriggerSource: MailSyncTriggerSourceManualBatch}
+
+	provider := &syncProviderClientStub{headerPage: &mailboxpkg.HeaderPage{Headers: []mailboxpkg.Header{}, NextCursor: nil}}
+	svc := newMailboxSyncServiceForTest(repo, &syncResolverStub{})
+	svc.now = func() time.Time { return fixedNow }
+	svc.providers = map[string]mailboxpkg.ProviderClient{MailboxProviderKindBasic: provider}
+
+	job, err := svc.RunSyncJob(context.Background(), 93)
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	require.Equal(t, MailboxCursorState{mailboxSyncCursorInitializedKey: true}, repo.capabilities[11].CursorState)
+
+	nextReq, err := svc.BuildListHeadersRequest(context.Background(), repo.capabilities[11], 100)
+	require.NoError(t, err)
+	require.Nil(t, nextReq.InitialBackfillSince)
+	require.Zero(t, nextReq.InitialBackfillPerDirection)
+	require.Nil(t, nextReq.CapabilityProfile.InitialBackfillSince)
+	require.Zero(t, nextReq.CapabilityProfile.InitialBackfillPerDirection)
+	require.Equal(t, 100, nextReq.Limit)
 }
 
 func TestMailboxSyncService_RunSyncJobTransientProviderErrorSchedulesRetryWithBackoff(t *testing.T) {

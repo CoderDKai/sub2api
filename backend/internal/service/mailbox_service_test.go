@@ -258,21 +258,21 @@ func TestMailboxServiceTestCapabilityMarksErrorWhenProviderClientMissing(t *test
 }
 
 type mailboxRepositoryStub struct {
-	providers         map[int64]*ProviderAccount
-	collectors        map[int64]*CollectorMailbox
-	capabilities      map[int64]*MailboxCapability
-	identities        map[int64]*RecipientIdentity
-	matchValues       map[int64][]*RecipientMatchValue
+	providers                    map[int64]*ProviderAccount
+	collectors                   map[int64]*CollectorMailbox
+	capabilities                 map[int64]*MailboxCapability
+	identities                   map[int64]*RecipientIdentity
+	matchValues                  map[int64][]*RecipientMatchValue
 	listRecipientMatchValueCalls int
-	listAllMatchValueCalls int
-	nextProviderID    int64
-	nextCollectorID   int64
-	nextCapabilityID  int64
-	nextIdentityID    int64
-	nextMatchValueID  int64
-	createProviderErr error
-	updateProviderErr error
-	updateCapErr      error
+	listAllMatchValueCalls       int
+	nextProviderID               int64
+	nextCollectorID              int64
+	nextCapabilityID             int64
+	nextIdentityID               int64
+	nextMatchValueID             int64
+	createProviderErr            error
+	updateProviderErr            error
+	updateCapErr                 error
 }
 
 var _ MailboxRepository = (*mailboxRepositoryStub)(nil)
@@ -489,6 +489,14 @@ func (r *mailboxRepositoryStub) GetHeaderByID(ctx context.Context, id int64) (*M
 
 func (r *mailboxRepositoryStub) ListHeaders(ctx context.Context, filter MailHeaderListFilter) ([]*MailHeader, int64, error) {
 	panic("unexpected ListHeaders call")
+}
+
+func (r *mailboxRepositoryStub) UpsertSyncHeaders(ctx context.Context, headers []*MailHeader) ([]*MailHeader, error) {
+	panic("unexpected UpsertSyncHeaders call")
+}
+
+func (r *mailboxRepositoryStub) UpdateHeaderDetail(ctx context.Context, header *MailHeader) (*MailHeader, error) {
+	panic("unexpected UpdateHeaderDetail call")
 }
 
 func (r *mailboxRepositoryStub) CreateSyncJobs(ctx context.Context, jobs []*MailSyncJob) ([]*MailSyncJob, error) {

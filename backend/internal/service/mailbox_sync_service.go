@@ -16,6 +16,7 @@ const (
 	mailboxSyncDefaultListLimit        = 100
 	mailboxSyncInitialBackfillDays     = 30
 	mailboxSyncInitialBackfillPerDir   = 500
+	mailboxSyncCursorInitializedKey    = "initialized"
 	mailboxSyncActiveJobScanLimit      = 1000
 	mailboxSyncRetryBaseBackoff        = 30 * time.Second
 	mailboxSyncRetryMaxBackoff         = 15 * time.Minute
@@ -42,11 +43,6 @@ type MailboxListHeadersRequest struct {
 
 type mailboxRecipientResolver interface {
 	Resolve(ctx context.Context, input MailboxRecipientResolutionInput) (*MailboxRecipientResolutionResult, error)
-}
-
-type mailboxSyncHeaderStore interface {
-	UpsertSyncHeaders(ctx context.Context, headers []*MailHeader) ([]*MailHeader, error)
-	UpdateHeaderDetail(ctx context.Context, header *MailHeader) (*MailHeader, error)
 }
 
 type MailboxSyncService struct {
@@ -178,7 +174,7 @@ func (s *MailboxSyncService) BuildListHeadersRequest(ctx context.Context, capabi
 		},
 		Limit: limit,
 	}
-	if len(capability.CursorState) == 0 {
+	if !mailboxSyncCursorInitialized(capability.CursorState) {
 		since := s.now().UTC().Add(-mailboxSyncInitialBackfillDays * 24 * time.Hour)
 		req.InitialBackfillSince = &since
 		req.InitialBackfillPerDirection = mailboxSyncInitialBackfillPerDir
@@ -236,7 +232,7 @@ func (s *MailboxSyncService) RunSyncJob(ctx context.Context, jobID int64) (*Mail
 	}
 	finishedAt := s.now().UTC()
 	updatedCapability := cloneMailboxCapabilityValue(capability)
-	updatedCapability.CursorState = MailboxCursorState(mapFromMailboxCursorState(pageNextCursor(page)))
+	updatedCapability.CursorState = mailboxSyncNextCursorState(page)
 	updatedCapability.LastSyncAt = &finishedAt
 	updatedCapability.LastError = nil
 	updatedCapability.HealthState = MailboxCapabilityStateHealthy
@@ -260,10 +256,6 @@ func (s *MailboxSyncService) RunSyncJob(ctx context.Context, jobID int64) (*Mail
 }
 
 func (s *MailboxSyncService) FetchDetail(ctx context.Context, headerID int64) (*MailHeader, error) {
-	store, err := s.headerStore()
-	if err != nil {
-		return nil, err
-	}
 	header, err := s.repo.GetHeaderByID(ctx, headerID)
 	if err != nil {
 		return nil, err
@@ -277,7 +269,7 @@ func (s *MailboxSyncService) FetchDetail(ctx context.Context, headerID int64) (*
 	if err != nil {
 		updated := cloneMailHeaderValue(header)
 		updated.DetailFetchState = MailDetailFetchStateFailed
-		persisted, updateErr := store.UpdateHeaderDetail(ctx, updated)
+		persisted, updateErr := s.repo.UpdateHeaderDetail(ctx, updated)
 		if updateErr != nil {
 			return nil, updateErr
 		}
@@ -286,7 +278,7 @@ func (s *MailboxSyncService) FetchDetail(ctx context.Context, headerID int64) (*
 	updated := cloneMailHeaderValue(header)
 	applyResolutionResult(updated, result)
 	updated.DetailFetchState = MailDetailFetchStateSucceeded
-	persisted, err := store.UpdateHeaderDetail(ctx, updated)
+	persisted, err := s.repo.UpdateHeaderDetail(ctx, updated)
 	if err != nil {
 		return nil, err
 	}
@@ -412,10 +404,6 @@ func (s *MailboxSyncService) findActiveSyncJob(ctx context.Context, jobID int64)
 }
 
 func (s *MailboxSyncService) persistHeaders(ctx context.Context, capability *MailboxCapability, page *mailboxpkg.HeaderPage) ([]*MailHeader, error) {
-	store, err := s.headerStore()
-	if err != nil {
-		return nil, err
-	}
 	if page == nil || len(page.Headers) == 0 {
 		return []*MailHeader{}, nil
 	}
@@ -447,7 +435,7 @@ func (s *MailboxSyncService) persistHeaders(ctx context.Context, capability *Mai
 		}
 		headers = append(headers, persisted)
 	}
-	return store.UpsertSyncHeaders(ctx, headers)
+	return s.repo.UpsertSyncHeaders(ctx, headers)
 }
 
 func (s *MailboxSyncService) updateCapabilityHealth(ctx context.Context, capability *MailboxCapability, healthState string, lastError *string, updateLastSync bool) (*MailboxCapability, error) {
@@ -459,14 +447,6 @@ func (s *MailboxSyncService) updateCapabilityHealth(ctx context.Context, capabil
 		updated.LastSyncAt = &now
 	}
 	return s.repo.UpdateCapability(ctx, updated)
-}
-
-func (s *MailboxSyncService) headerStore() (mailboxSyncHeaderStore, error) {
-	store, ok := s.repo.(mailboxSyncHeaderStore)
-	if !ok || store == nil {
-		return nil, errors.New("mailbox header store is not configured")
-	}
-	return store, nil
 }
 
 func (s *MailboxSyncService) decorateContext(ctx context.Context) context.Context {
@@ -582,6 +562,30 @@ func pageNextCursor(page *mailboxpkg.HeaderPage) map[string]any {
 		return nil
 	}
 	return cloneMailboxSyncMap(page.NextCursor)
+}
+
+func mailboxSyncNextCursorState(page *mailboxpkg.HeaderPage) MailboxCursorState {
+	state := MailboxCursorState{}
+	for key, value := range pageNextCursor(page) {
+		state[key] = value
+	}
+	state[mailboxSyncCursorInitializedKey] = true
+	return state
+}
+
+func mailboxSyncCursorInitialized(state MailboxCursorState) bool {
+	if len(state) == 0 {
+		return false
+	}
+	value, ok := state[mailboxSyncCursorInitializedKey]
+	if !ok {
+		return false
+	}
+	initialized, ok := value.(bool)
+	if !ok {
+		return false
+	}
+	return initialized
 }
 
 func cloneMailHeaderValue(in *MailHeader) *MailHeader {

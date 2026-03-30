@@ -258,6 +258,81 @@ func TestMailboxRepository_HeaderReadsHideDeletedRelations(t *testing.T) {
 	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
+func TestMailboxRepository_UpsertSyncHeadersAndUpdateHeaderDetail(t *testing.T) {
+	ctx := context.Background()
+	repo := newMailboxRepositoryForTest(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	capability := mustCreateMailboxCapability(t, ctx, repo, mailboxCapabilitySeed{CapabilityKind: "imap-sync-upsert"})
+	sender := "sender@example.com"
+
+	headers, err := repo.UpsertSyncHeaders(ctx, []*service.MailHeader{{
+		CollectorID:        capability.CollectorID,
+		CapabilityID:       capability.ID,
+		RemoteMessageID:    "sync-msg-1",
+		Folder:             "INBOX",
+		Sender:             &sender,
+		Recipients:         []string{"team@example.com"},
+		Subject:            "first subject",
+		ReceivedAt:         now,
+		Flags:              []string{"seen"},
+		Snippet:            "first snippet",
+		EnvelopeRecipients: []string{"team@example.com"},
+		DeliveredTo:        []string{"support@example.com"},
+		OriginalTo:         []string{"original@example.com"},
+		ResolutionState:    service.MailResolutionStateUnresolved,
+		DetailFetchState:   service.MailDetailFetchStateNotRequested,
+	}})
+	require.NoError(t, err)
+	require.Len(t, headers, 1)
+	require.NotZero(t, headers[0].ID)
+	require.Equal(t, "first subject", headers[0].Subject)
+
+	updatedHeaders, err := repo.UpsertSyncHeaders(ctx, []*service.MailHeader{{
+		CollectorID:        capability.CollectorID,
+		CapabilityID:       capability.ID,
+		RemoteMessageID:    "sync-msg-1",
+		Folder:             "INBOX",
+		Sender:             &sender,
+		Recipients:         []string{"team@example.com", "other@example.com"},
+		Subject:            "second subject",
+		ReceivedAt:         now.Add(1 * time.Minute),
+		Flags:              []string{"seen", "flagged"},
+		Snippet:            "second snippet",
+		EnvelopeRecipients: []string{"team@example.com", "other@example.com"},
+		DeliveredTo:        []string{"support@example.com"},
+		OriginalTo:         []string{"original@example.com"},
+		ResolutionState:    service.MailResolutionStateUnresolved,
+		DetailFetchState:   service.MailDetailFetchStateNotRequested,
+	}})
+	require.NoError(t, err)
+	require.Len(t, updatedHeaders, 1)
+	require.Equal(t, headers[0].ID, updatedHeaders[0].ID)
+	require.Equal(t, "second subject", updatedHeaders[0].Subject)
+	require.Equal(t, []string{"team@example.com", "other@example.com"}, updatedHeaders[0].Recipients)
+
+	headerForDetail := updatedHeaders[0]
+	resolvedAddress := "team@example.com"
+	resolutionField := "envelope_recipients"
+	headerForDetail.ResolvedAddress = &resolvedAddress
+	headerForDetail.ResolutionSourceField = &resolutionField
+	headerForDetail.ResolutionState = service.MailResolutionStateAmbiguous
+	headerForDetail.DetailFetchState = service.MailDetailFetchStateFailed
+
+	detailUpdated, err := repo.UpdateHeaderDetail(ctx, headerForDetail)
+	require.NoError(t, err)
+	require.Equal(t, service.MailResolutionStateAmbiguous, detailUpdated.ResolutionState)
+	require.Equal(t, service.MailDetailFetchStateFailed, detailUpdated.DetailFetchState)
+	require.NotNil(t, detailUpdated.ResolvedAddress)
+	require.Equal(t, resolvedAddress, *detailUpdated.ResolvedAddress)
+
+	fetched, err := repo.GetHeaderByID(ctx, headers[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, service.MailResolutionStateAmbiguous, fetched.ResolutionState)
+	require.Equal(t, service.MailDetailFetchStateFailed, fetched.DetailFetchState)
+	require.Equal(t, "second subject", fetched.Subject)
+	require.Equal(t, []string{"team@example.com", "other@example.com"}, fetched.Recipients)
+}
+
 func TestMailboxRepository_ProviderAccountCRUDAndList(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)
