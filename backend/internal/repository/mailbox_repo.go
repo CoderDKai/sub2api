@@ -1422,7 +1422,7 @@ func (r *mailboxRepository) ListSyncJobsByBatchID(ctx context.Context, batchID s
 	return jobs, nil
 }
 
-func (r *mailboxRepository) ListRunnableRetrySyncJobs(ctx context.Context, now time.Time, limit int) ([]*service.MailSyncJob, error) {
+func (r *mailboxRepository) ClaimRunnableRetrySyncJobs(ctx context.Context, now time.Time, limit int) ([]*service.MailSyncJob, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mailbox repository db is nil")
 	}
@@ -1434,32 +1434,62 @@ func (r *mailboxRepository) ListRunnableRetrySyncJobs(ctx context.Context, now t
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
+		WITH candidates AS (
+			SELECT j.id
+			FROM mailbox_sync_jobs j
+			JOIN mailbox_capabilities c ON c.id = j.capability_id AND c.deleted_at IS NULL
+			JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL
+			JOIN mailbox_collectors mc ON mc.id = c.collector_id AND mc.deleted_at IS NULL
+			WHERE j.state = $1
+				AND j.trigger_source = $2
+				AND j.next_retry_at IS NOT NULL
+				AND j.next_retry_at <= $3
+			ORDER BY j.next_retry_at ASC, j.id ASC
+			LIMIT $4
+			FOR UPDATE SKIP LOCKED
+		), claimed AS (
+			UPDATE mailbox_sync_jobs j
+			SET
+				state = $5,
+				started_at = COALESCE(j.started_at, $3),
+				updated_at = NOW()
+			FROM candidates
+			WHERE j.id = candidates.id
+				AND j.state = $1
+			RETURNING
+				j.id,
+				j.capability_id,
+				j.batch_id,
+				j.state,
+				j.trigger_source,
+				j.scheduled_for,
+				j.started_at,
+				j.finished_at,
+				j.retryable,
+				j.retry_count,
+				j.next_retry_at,
+				j.error_summary,
+				j.created_at,
+				j.updated_at
+		)
 		SELECT
-			j.id,
-			j.capability_id,
-			j.batch_id,
-			j.state,
-			j.trigger_source,
-			j.scheduled_for,
-			j.started_at,
-			j.finished_at,
-			j.retryable,
-			j.retry_count,
-			j.next_retry_at,
-			j.error_summary,
-			j.created_at,
-			j.updated_at
-		FROM mailbox_sync_jobs j
-		JOIN mailbox_capabilities c ON c.id = j.capability_id AND c.deleted_at IS NULL
-		JOIN mailbox_provider_accounts pa ON pa.id = c.provider_account_id AND pa.deleted_at IS NULL
-		JOIN mailbox_collectors mc ON mc.id = c.collector_id AND mc.deleted_at IS NULL
-		WHERE j.state = $1
-			AND j.trigger_source = $2
-			AND j.next_retry_at IS NOT NULL
-			AND j.next_retry_at <= $3
-		ORDER BY j.next_retry_at ASC, j.id ASC
-		LIMIT $4
-	`, service.MailSyncJobStateQueued, service.MailSyncTriggerSourceRetry, now, limit)
+			id,
+			capability_id,
+			batch_id,
+			state,
+			trigger_source,
+			scheduled_for,
+			started_at,
+			finished_at,
+			retryable,
+			retry_count,
+			next_retry_at,
+			error_summary,
+			created_at,
+			updated_at
+		FROM claimed
+		ORDER BY next_retry_at ASC, id ASC
+	`, service.MailSyncJobStateQueued, service.MailSyncTriggerSourceRetry, now, limit, service.MailSyncJobStateRunning)
 	if err != nil {
 		return nil, err
 	}

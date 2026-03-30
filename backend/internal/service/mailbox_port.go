@@ -225,7 +225,7 @@ type MailboxRepository interface {
 
 	CreateSyncJobs(ctx context.Context, jobs []*MailSyncJob) ([]*MailSyncJob, error)
 	ListSyncJobsByBatchID(ctx context.Context, batchID string) ([]*MailSyncJob, error)
-	ListRunnableRetrySyncJobs(ctx context.Context, now time.Time, limit int) ([]*MailSyncJob, error)
+	ClaimRunnableRetrySyncJobs(ctx context.Context, now time.Time, limit int) ([]*MailSyncJob, error)
 	ListActiveSyncJobs(ctx context.Context, capabilityID *int64, limit int) ([]*MailSyncJob, error)
 	UpdateSyncJobState(ctx context.Context, jobID int64, state string, startedAt, finishedAt, nextRetryAt *time.Time, errorSummary *string) (*MailSyncJob, error)
 

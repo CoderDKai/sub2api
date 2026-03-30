@@ -25,7 +25,7 @@ func (s *MailboxSyncRunnerService) RunDue(ctx context.Context, limit int) ([]*Ma
 	jobs := make([]*MailSyncJob, 0)
 	var runErr error
 
-	retryJobs, err := s.repo.ListRunnableRetrySyncJobs(ctx, now, limit)
+	retryJobs, err := s.repo.ClaimRunnableRetrySyncJobs(ctx, now, limit)
 	if err != nil {
 		return nil, err
 	}

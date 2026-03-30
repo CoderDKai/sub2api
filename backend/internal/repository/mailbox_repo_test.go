@@ -145,7 +145,7 @@ func TestMailboxRepository_CreateSyncJobsReturnsIDsAndClaimDueCapabilitiesSkipsA
 	require.Empty(t, dueCapabilities)
 }
 
-func TestMailboxRepository_ListRunnableRetrySyncJobsReturnsDueRetryJobs(t *testing.T) {
+func TestMailboxRepository_ClaimRunnableRetrySyncJobsClaimsEachRetryJobOnce(t *testing.T) {
 	ctx := context.Background()
 	repo := newMailboxRepositoryForTest(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -181,11 +181,17 @@ func TestMailboxRepository_ListRunnableRetrySyncJobsReturnsDueRetryJobs(t *testi
 	require.NoError(t, err)
 	require.Len(t, jobs, 3)
 
-	runnable, err := repo.ListRunnableRetrySyncJobs(ctx, now, 10)
+	runnable, err := repo.ClaimRunnableRetrySyncJobs(ctx, now, 10)
 	require.NoError(t, err)
 	require.Len(t, runnable, 1)
 	require.Equal(t, jobs[0].ID, runnable[0].ID)
 	require.Equal(t, service.MailSyncTriggerSourceRetry, runnable[0].TriggerSource)
+	require.Equal(t, service.MailSyncJobStateRunning, runnable[0].State)
+	require.NotNil(t, runnable[0].StartedAt)
+
+	runnableAgain, err := repo.ClaimRunnableRetrySyncJobs(ctx, now, 10)
+	require.NoError(t, err)
+	require.Empty(t, runnableAgain)
 }
 
 func TestMailboxRepository_ListHeadersFiltersByCollectorAndFolder(t *testing.T) {
