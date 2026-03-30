@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -41,6 +42,9 @@ func (s *MailboxSyncRunnerService) RunDue(ctx context.Context, limit int) ([]*Ma
 		ScheduledFor:  &now,
 	})
 	if err != nil {
+		if requeueErr := s.requeueCapabilities(ctx, capabilities, now); requeueErr != nil {
+			return nil, errors.Join(err, requeueErr)
+		}
 		return nil, err
 	}
 	for _, job := range jobs {
@@ -52,4 +56,18 @@ func (s *MailboxSyncRunnerService) RunDue(ctx context.Context, limit int) ([]*Ma
 		}
 	}
 	return jobs, nil
+}
+
+func (s *MailboxSyncRunnerService) requeueCapabilities(ctx context.Context, capabilities []*MailboxCapability, now time.Time) error {
+	for _, capability := range capabilities {
+		if capability == nil {
+			continue
+		}
+		updated := cloneMailboxCapabilityValue(capability)
+		updated.NextSyncAt = cloneTimePointer(&now)
+		if _, err := s.repo.UpdateCapability(ctx, updated); err != nil {
+			return err
+		}
+	}
+	return nil
 }

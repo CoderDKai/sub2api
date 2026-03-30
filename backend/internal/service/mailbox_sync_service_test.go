@@ -209,7 +209,39 @@ func TestMailboxSyncRunnerService_RunDueCreatesScheduleJobsBeforeExecuting(t *te
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)
 	require.Equal(t, MailSyncTriggerSourceSchedule, jobs[0].TriggerSource)
-	require.Equal(t, []string{"claim_due", "create_jobs", "provider_list"}, repo.events[:3])
+	require.Equal(t, []string{"claim_due", "create_jobs"}, repo.events[:2])
+	require.Contains(t, repo.events, "provider_list")
+}
+
+func TestMailboxSyncRunnerService_RunDueRequeuesCapabilitiesWhenScheduleJobCreationFails(t *testing.T) {
+	fixedNow := time.Date(2026, 3, 30, 11, 30, 0, 0, time.UTC)
+	futureSync := fixedNow.Add(5 * time.Minute)
+	repo := newMailboxSyncRepositoryStub()
+	repo.capabilities[11] = &MailboxCapability{
+		ID:                11,
+		ProviderAccountID: 3,
+		CollectorID:       7,
+		CapabilityKind:    "imap-primary",
+		ConnectionConfig:  MailboxConnectionConfig{"folder": "INBOX"},
+		SyncEnabled:       true,
+		HealthState:       MailboxCapabilityStateHealthy,
+		NextSyncAt:        &futureSync,
+	}
+	repo.claimedCapabilityIDs = []int64{11}
+	repo.claimAdvanceTo = &futureSync
+	repo.createSyncErr = errors.New("insert failed")
+
+	syncSvc := newMailboxSyncServiceForTest(repo, &syncResolverStub{})
+	syncSvc.now = func() time.Time { return fixedNow }
+	runner := NewMailboxSyncRunnerService(repo, syncSvc)
+	runner.now = func() time.Time { return fixedNow }
+
+	jobs, err := runner.RunDue(context.Background(), 10)
+	require.Error(t, err)
+	require.Nil(t, jobs)
+	require.NotNil(t, repo.capabilities[11].NextSyncAt)
+	require.Equal(t, fixedNow, repo.capabilities[11].NextSyncAt.UTC())
+	require.Contains(t, repo.events, "requeue_due")
 }
 
 type mailboxSyncRepositoryStub struct {
@@ -227,6 +259,7 @@ type mailboxSyncRepositoryStub struct {
 	createSyncJobsStarted chan struct{}
 	createSyncJobsRelease chan struct{}
 	createSyncJobsOnce    sync.Once
+	claimAdvanceTo        *time.Time
 	jobUpdateErr          error
 	createSyncErr         error
 	claimErr              error
@@ -333,9 +366,23 @@ func (r *mailboxSyncRepositoryStub) ClaimDueCapabilities(ctx context.Context, no
 	r.events = append(r.events, "claim_due")
 	items := make([]*MailboxCapability, 0, len(r.claimedCapabilityIDs))
 	for _, id := range r.claimedCapabilityIDs {
+		if r.claimAdvanceTo != nil {
+			repoCap := cloneMailboxCapability(r.capabilities[id])
+			repoCap.NextSyncAt = cloneTimePtr(r.claimAdvanceTo)
+			r.capabilities[id] = repoCap
+		}
 		items = append(items, cloneMailboxCapability(r.capabilities[id]))
 	}
 	return items, nil
+}
+
+func (r *mailboxSyncRepositoryStub) UpdateCapability(ctx context.Context, capability *MailboxCapability) (*MailboxCapability, error) {
+	updated, err := r.mailboxRepositoryStub.UpdateCapability(ctx, capability)
+	if err != nil {
+		return nil, err
+	}
+	r.events = append(r.events, "requeue_due")
+	return updated, nil
 }
 
 func (r *mailboxSyncRepositoryStub) UpsertSyncHeaders(ctx context.Context, headers []*MailHeader) ([]*MailHeader, error) {
